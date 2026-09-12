@@ -135,7 +135,9 @@ def extract_features(backbone, image_paths, transform, args, device):
         img = Image.open(path).convert('RGB')
         img_t = transform(img).unsqueeze(0).to(device)
         # 预训练阶段不使用掩码：传全 1 掩码等效于普通自注意力
-        mask = torch.ones(1, img_t.size(2), img_t.size(3), device=device)
+        # mask 需为 4D [B, 1, H, W]：MGViT.prepare_mask 内 AvgPool2d 要求 4D 输入，
+        # 并在后面对 pooled 结果做 B, nc, w, h = shape 四元解包。
+        mask = torch.ones(1, 1, img_t.size(2), img_t.size(3), device=device)
         feat = backbone(img_t, mask)  # (1, feat_dim)
         features.append(feat.squeeze(0))
     return torch.stack(features, dim=0)

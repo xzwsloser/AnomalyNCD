@@ -1,6 +1,6 @@
 # 任务1（Task1）执行记录
 
-> 状态：**代码已实现 + 静态验证通过；训练前可视化待服务器运行**
+> 状态：代码已实现 + 静态验证通过；训练前可视化待服务器运行（多轮修复见 §7 修改记录）
 > 创建时间：2026-09-12
 > 对应计划：`plans/task1_plan.md`
 
@@ -39,3 +39,17 @@
 ## 6. 遗留事项
 - 训练前可视化的实际效果图需在服务器跑出后回填确认。
 - 多 head 处理采用「共享同一个等角矩阵」方案，如需改动可后续调整。
+
+## 7. 修改记录（多轮执行，单文件维护）
+> 同一任务的多次改动统一记录在本文件，不另建版本文件（规则见 AGENTS.md §1.1 第 5 条）。
+
+### v2（2026-09-12）修复可视化脚本模块导入路径
+- 问题：服务器运行 `python examples/visualize_tsne.py --dataset_path ...` 报 `ModuleNotFoundError: No module named 'models'`。
+- 改动：`examples/visualize_tsne.py` 顶部新增 `import sys` + `sys.path.append(os.getcwd())`，与 `anomalyncd_main.py` 一致。
+- 验证：本机 `python3 -m py_compile` 通过；服务器待重跑确认。
+
+### v3（2026-09-12）修复可视化脚本 mask 维度
+- 问题：特征抽取报 `ValueError: not enough values to unpack (expected 4, got 3)`，定位 `_MGViT.py::prepare_mask`。
+- 根因：脚本传 3D mask `[1,H,W]`，而 `prepare_mask` 的 `AvgPool2d` 需 4D `[1,1,H,W]`。
+- 改动：`examples/visualize_tsne.py::extract_features` 中 mask 改为 `torch.ones(1, 1, H, W)`。
+- 验证：本机 `python3 -m py_compile` 通过；服务器待重跑确认。

@@ -1,6 +1,6 @@
 # 任务1（Task1）执行计划
 
-> 状态：**待 review**
+> 状态：已 review；多轮修改均在文件内维护（见 §13 修改记录）
 > 创建时间：2026-09-12（依据飞书考核文档与用户确认更新）
 > 需求来源：飞书《AnomalyNCD考核任务》· Task1
 > 对应记录：`sessions/task1_session.md`
@@ -95,3 +95,17 @@
 
 ### 12.4 one-hot 标签 vs 等角原型
 - one-hot 决定“贴哪个原型”，等角矩阵决定“原型之间如何摆”，不冲突。本任务只做训练前可视化，不涉训练收敛验证。
+
+## 13. 修改记录（多轮执行，单文件维护）
+> 同一任务的多次改动统一记录在本文件，不另建版本文件（规则见 AGENTS.md §1.1 第 5 条）。
+
+### v2（2026-09-12）修复可视化脚本模块导入路径
+- 问题：服务器直接运行脚本报 `ModuleNotFoundError: No module named 'models'`（脚本所在目录 `examples/` 已在 `sys.path`，但仓库根目录不在）。
+- 改动：`examples/visualize_tsne.py` 顶部新增 `import sys`，并加入 `sys.path.append(os.getcwd())`（含中文注释），与 `examples/anomalyncd_main.py` 保持一致。
+- 验证：本机 `python3 -m py_compile` 通过。
+
+### v3（2026-09-12）修复可视化脚本 mask 维度
+- 问题：特征抽取时报 `ValueError: not enough values to unpack (expected 4, got 3)`，定位 `_MGViT.py::prepare_mask`。
+- 根因：`prepare_mask` 内 `mask_downscaling` 为 `AvgPool2d`，要求 4D `[1,1,H,W]`；脚本却传 3D `[1,H,W]`。
+- 改动：`examples/visualize_tsne.py::extract_features` 中 mask 由 `torch.ones(1, H, W)` 改为 `torch.ones(1, 1, H, W)`（补通道维），加中文注释。
+- 验证：本机 `python3 -m py_compile` 通过。
