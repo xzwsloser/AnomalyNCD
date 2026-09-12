@@ -14,6 +14,7 @@ import argparse
 import os
 import random
 import sys
+import time
 
 # 与 examples/anomalyncd_main.py 保持一致：直接以 python examples/xxx.py 运行脚本时，
 # Python 仅会把脚本所在目录 examples/ 加入 sys.path，这里把仓库根目录也加入，
@@ -26,6 +27,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 from PIL import Image
 from sklearn.manifold import TSNE
+from tqdm import tqdm
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -129,9 +131,12 @@ def collect_images(dataset_path, samples_per_class, seed):
 
 @torch.no_grad()
 def extract_features(backbone, image_paths, transform, args, device):
-    """加载图像并经预训练主干抽取 CLS 特征，形状 (N, feat_dim)。"""
+    """加载图像并经预训练主干抽取 CLS 特征，形状 (N, feat_dim)，带进度显示。"""
     features = []
-    for path in image_paths:
+    t_start = time.time()
+    # tqdm 实时显示：处理进度、单张耗时(s/it)与估计剩余时间(ETA)，便于掌握运行时长
+    pbar = tqdm(image_paths, desc='[进度] 抽取特征', unit='张', ncols=90)
+    for path in pbar:
         img = Image.open(path).convert('RGB')
         img_t = transform(img).unsqueeze(0).to(device)
         # 预训练阶段不使用掩码：传全 1 掩码等效于普通自注意力
@@ -140,6 +145,8 @@ def extract_features(backbone, image_paths, transform, args, device):
         mask = torch.ones(1, 1, img_t.size(2), img_t.size(3), device=device)
         feat = backbone(img_t, mask)  # (1, feat_dim)
         features.append(feat.squeeze(0))
+    pbar.close()
+    print(f"[进度] 特征抽取完成：共 {len(image_paths)} 张，耗时 {time.time()-t_start:.1f}s。")
     return torch.stack(features, dim=0)
 
 
@@ -152,10 +159,13 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"使用设备：{device}")
+    t_run = time.time()
 
     # 1. 加载预训练编码器
+    print(f"[进度] 开始加载预训练编码器 {args.pretrained_backbone}（首次运行需联网下载 DINO 权重）...", flush=True)
     backbone = load_backbone(args.pretrained_backbone, mask_layers=args.mask_layers)
     backbone = backbone.to(device).eval()
+    print(f"[进度] 主干加载完成，耗时 {time.time()-t_run:.1f}s。")
 
     # 2. 构建 ETF 分类头并读取固定原型
     class_names, image_paths = collect_images(args.dataset_path, args.samples_per_class, args.seed)
@@ -169,13 +179,17 @@ def main():
     if not image_paths:
         raise FileNotFoundError(f"在 {args.dataset_path} 下没有找到图像，请检查数据集路径。")
     transform = build_transform(args)
+    t_feat = time.time()
     features = extract_features(backbone, image_paths, transform, args, device).cpu()
-    print(f"采样图像特征：{features.shape}，原型：{prototypes.shape}")
+    t_tsne = time.time()
+    print(f"[进度] 采样图像特征：{features.shape}，原型：{prototypes.shape}")
 
     # 4. 将图像特征与原型合并做 t-SNE，保证两者在同一 2D 空间
     combined = torch.cat([features, prototypes], dim=0).numpy()
     tsne = TSNE(n_components=2, random_state=args.seed, init='pca', perplexity=min(30, combined.shape[0]-1))
     emb = tsne.fit_transform(combined)
+    t_plot = time.time()
+    print(f"[进度] t-SNE 降维完成，耗时 {t_plot-t_tsne:.1f}s。")
 
     # 5. 绘制单张总览图
     n_feats = features.shape[0]
@@ -203,7 +217,8 @@ def main():
     plt.tight_layout()
     plt.savefig(args.output, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print(f"可视化图片已保存到：{args.output}")
+    print(f"[进度] 可视化图片已保存到：{args.output}")
+    print(f"[进度] 总耗时 {time.time()-t_run:.1f}s。")
 
 
 if __name__ == '__main__':

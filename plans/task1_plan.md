@@ -109,3 +109,11 @@
 - 根因：`prepare_mask` 内 `mask_downscaling` 为 `AvgPool2d`，要求 4D `[1,1,H,W]`；脚本却传 3D `[1,H,W]`。
 - 改动：`examples/visualize_tsne.py::extract_features` 中 mask 由 `torch.ones(1, H, W)` 改为 `torch.ones(1, 1, H, W)`（补通道维），加中文注释。
 - 验证：本机 `python3 -m py_compile` 通过。
+
+### v4（2026-09-12）添加进度可视化（进度条 + 分阶段耗时）
+- 问题：`examples/visualize_tsne.py` 特征抽取为静默逐张循环，运行中看不到进度与已消耗时长。
+- 改动：
+  - 引入 `import time` 与 `from tqdm import tqdm`（`requirements.txt` 已含 tqdm）。
+  - `extract_features` 对图片遍历包 `tqdm`，实时显示进度、单张耗时与剩余时间。
+  - `main()` 记录并打印各阶段耗时：加载主干（含 DINO 权重下载）、特征抽取、t-SNE 降维、绘图，以及总耗时。
+- 验证：本机 `python3 -m py_compile` 通过；服务器重跑后应能看到进度条与分阶段耗时输出。
