@@ -69,6 +69,10 @@ bash -n scripts/prepare_mvtec_musc_anomaly_maps.sh scripts/anomalyncd_task2.sh
 
 结果：`local validation passed`。
 
+### ETF 配置核对
+
+`use_etf` 仅通过 `load_args` 传入 `MultiHead`，运行时没有其他硬编码依赖。为避免 Task2 与 baseline 比较时引入分类头差异，已将两个配置的 `models.use_etf` 统一改为 `False`。
+
 ### 配置解析验证
 
 ```text
@@ -98,3 +102,9 @@ git diff --check
 2. baseline 与 Task2 的 15 类训练尚未运行；执行前需重新确认磁盘、数据、GPU 空闲状态。
 3. 需要收集 `outputs/mvtec_musc_crop/metrics.csv` 与 `outputs/mvtec_musc_crop_task2/metrics.csv`，汇总 region-merged NMI/ARI/F1 并完成原因分析。
 4. 执行完成后回填服务器命令、日志路径、每类指标和结论。
+
+## 5. 修改记录
+
+- v2（2026-09-13）：通过 SSH 搜索服务器，确认 `/mnt/data/ejxu/data/AeBAD_crop` 等 5 个候选均为 4 类、1278 张图像且 mask 数量一致；新增并接入 `scripts/link_server_aebad_crop.sh`，用于幂等创建/校验 `data/AeBAD_crop` symlink，避免重复占用磁盘。已在服务器创建 `data/AeBAD_crop -> /mnt/data/ejxu/data/AeBAD_crop`，远端校验 classes=4、images=1278、masks=1278。本地 `bash -n`、fixture 幂等测试与 `git diff --check` 通过。
+- v3（2026-09-13）：根据确认结论关闭 ETF；同步修改 baseline 与 Task2 配置为 `use_etf=False`，并更新计划中的实验设置说明。
+- v4（2026-09-13）：确认 baseline 为 `scripts/anomalyncd.sh`；为 baseline 与 Task2 增加通过环境变量覆盖 GPU 和 MEBin 输出路径的能力，并让 baseline 自动复用/校验 AeBAD_crop 链接。训练日志、checkpoint 和 metrics 通过不同 `runner_name` 隔离；并行运行时必须为 MEBin 输出指定不同路径，避免共享数据目录删除/写入竞争。

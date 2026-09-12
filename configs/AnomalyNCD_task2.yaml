@@ -9,7 +9,7 @@ models:
   mask_layers: 9
   n_views: 2
   n_head: 4
-  use_etf: True
+  use_etf: False
 training:
   batch_size: 32
   num_workers: 8

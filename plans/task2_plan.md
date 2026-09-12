@@ -198,7 +198,7 @@
 | batch size / epochs | 32 / 50 | 32 / 50 | 与论文一致 |
 | optimizer | SGD，lr 0.003 | SGD，lr 0.003，momentum 0.9，weight decay 0.00005，CosineAnnealingLR | 仓库补充了 optimizer 细节和调度器 |
 | views / augmentation | 2 views；random crop、flip、color jitter、Gaussian blur、rotation、posterize、sharpness | `n_views=2`，`MVTecTransformWithMaskTrain` 应用同类增强且 mask 同步增强 | 与论文描述一致 |
-| classifier | multi-head，推理选择最小 loss 的 head | `n_head=4`；Task2 沿用 Task1 的 `use_etf=True` | ETF 是 Task1 改动；论文原表结果未使用 ETF，因此论文数值只作为参考，不做逐位复现要求 |
+| classifier | multi-head，推理选择最小 loss 的 head | `n_head=4`；Task2 使用 `use_etf=False` | Task2 只评估训练样本筛选，因此 baseline 与 Task2 均关闭 Task1 的 ETF，避免引入额外变量；论文原表结果未使用 ETF，仅作参考 |
 | loss weights | supervised loss 权重 λ=0.3；mean-entropy maximization 权重 µ=4 | `sup_weight=0.3`，`memax_weight=4` | 一致 |
 | teacher / student temperature | τt 从 0.07 线性降到 0.04，前 40 epochs 每 4 epochs 更新；τs=0.1 | `warmup_teacher_temp=0.07`，`teacher_temp=0.04`，`warmup_teacher_temp_epochs=40`，`repeat_times=4`，student temp 0.1 | 一致 |
 | MEBin | 采样 64 个阈值，最小稳定区间 τ=4 | `sample_rate=4`（等效 64 个采样点），`min_interval_len=4`，`erode=True` | 代码还使用 6×6 erosion kernel、1 次迭代 |
@@ -369,7 +369,9 @@ runner, setting, category, seed, train_unlabeled_before, train_unlabeled_after, 
 
 ## 10. 修改记录
 
+- v2（2026-09-13）：服务器检索确认存在完整 AeBAD_crop；新增 `scripts/link_server_aebad_crop.sh` 通过 symlink 复用数据，并在 Task2 训练脚本启动前自动检查/建立链接。
 - v1（2026-09-12）：创建 Task2 计划，明确只过滤 MVTec novel 训练集、保留全量测试集，并定义 baseline / Task2 对比与原因分析框架。
 - v2（2026-09-12）：补充服务器已有 MVTec MuSc anomaly map 的来源、路径、数量对账、symlink 映射方案和验证步骤；明确 MuSc 为 zero-shot 推理，不需要重新训练。
 - v3（2026-09-12）：根据论文 §4.1 与 Appendix A/B/C 补充论文实验设置、代码配置对照、MVTec 数据量和 MuSc 基准指标；新增训练过程与最终指标的观测方案。
 - v4（2026-09-12）：按 review 完成代码实现：新增 train_subset 配置、selection 生成/过滤逻辑、异常图 symlink 准备脚本和 Task2 训练脚本；本地静态验证与筛选单元验证通过，服务器实验待执行。
+- v5（2026-09-13）：确认 Task2 不使用 ETF；将 baseline 与 Task2 配置的 `models.use_etf` 统一设为 `False`，保证二者只差训练样本筛选规则。
