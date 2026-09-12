@@ -56,7 +56,7 @@ AnomalyNCD/
 │   └── modules/
 │       ├── _MEBin.py                # 主元素二值化 MEBin
 │       ├── _MGViT.py                # Mask-Guided Vision Transformer（掩码引导主干）
-│       ├── _classifier.py           # 分类头 MultiHead（当前为 weight-norm, DINO/SwAV 风格）
+│       ├── _classifier.py           # 分类头 MultiHead（支持固定 ETF 与 weight-norm 两种模式）
 │       └── load_backbone.py         # 预训练主干加载（DINO ViT）
 ├── examples/
 │   └── anomalyncd_main.py           # 命令行入口（解析参数并启动 AnomalyNCD）
@@ -79,10 +79,11 @@ AnomalyNCD/
 
 | papers 文件 | 论文名称 | 说明 | 对应参考实现 |
 | --- | --- | --- | --- |
+| `papers/2410.14379v2.pdf` | *AnomalyNCD: Towards Novel Anomaly Class Discovery in Industrial Scenarios*（arXiv:2410.14379） | 主仓库对应论文，方法、实验与消融说明可结合 `README.md` 阅读 | 本仓库 `models/` |
 | `papers/2308.02989v3.pdf` | *Novel Class Discovery for Long-tailed Recognition*（NCDLR，TMLR 2023，arXiv:2308.02989） | 提出 equiangular（等角）prototype 的 ETF 分类头，用于长尾场景的类别发现 | `reference/NCDLR/` |
 
-- **ETF 模块**：`reference/NCDLR/nets/vit.py` 中的 `ETF_Classifier`（含 `generate_random_orthogonal_matrix`），构造等角分类 prototype 矩阵 `ori_M`，前向时对特征归一化后与 `ori_M` 做矩阵乘法得到 logits。当前主仓库的 `models/modules/_classifier.py` 仍是 weight-norm 风格，尚未采用 ETF，是后续改造目标。
-- 主仓库自身对应论文 *AnomalyNCD*（arXiv:2410.14379），其内容在 `README.md`，不在 `papers/` 目录内。
+- **ETF 模块**：`reference/NCDLR/nets/vit.py` 中的 `ETF_Classifier`（含 `generate_random_orthogonal_matrix`），构造等角分类 prototype 矩阵 `ori_M`，前向时对特征归一化后与 `ori_M` 做矩阵乘法得到 logits。当前主仓库的 `models/modules/_classifier.py` 已在 Task1 中接入 ETF，可通过 `models.use_etf` 配置启用。
+- 主仓库自身对应论文 *AnomalyNCD*（arXiv:2410.14379）的 PDF 已存放在 `papers/2410.14379v2.pdf`，方法说明同时参考 `README.md`。
 
 ## 4. 代码风格约束
 

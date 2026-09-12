@@ -75,6 +75,11 @@ def load_args(cfg, args):
     args.warmup_teacher_temp = cfg['loss']['warmup_teacher_temp']
     args.warmup_teacher_temp_epochs = cfg['loss']['warmup_teacher_temp_epochs']
     args.repeat_times = cfg['loss']['repeat_times']
+    # Task2：按图像级异常分数筛选 novel 训练集；默认关闭，保持 baseline 可复现。
+    train_subset_cfg = cfg.get('train_subset', {})
+    args.use_train_subset = bool(train_subset_cfg.get('enabled', False))
+    args.train_subset_ratio = float(train_subset_cfg.get('ratio', 0.5))
+    args.train_subset_normal_class = str(train_subset_cfg.get('normal_class', 'good'))
     # ----------------------
     # experiment setting
     # ----------------------

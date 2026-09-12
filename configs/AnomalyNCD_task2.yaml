@@ -1,4 +1,4 @@
-# The results from the paper can be reproduced using the following parameters
+# Task2: novel training set is filtered by image-level anomaly scores.
 binarization:
   sample_rate: 4
   min_interval_len: 4
@@ -27,12 +27,12 @@ loss:
   warmup_teacher_temp_epochs: 40
   repeat_times: 4
 train_subset:
-  enabled: False
+  enabled: True
   ratio: 0.5
   normal_class: good
 experiment:
   seed: 3407
   print_freq: 3
   table_root: outputs/output_table
-  exp_name: AnomalyNCD
+  exp_name: AnomalyNCD_Task2
   exp_root: outputs

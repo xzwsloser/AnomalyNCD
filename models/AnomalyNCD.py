@@ -21,7 +21,13 @@ import cv2
 import matplotlib.pyplot as plt
 
 
-from datasets.data_utils import get_class_splits, get_datasets, get_pseudo_label_weights
+from datasets.data_utils import (
+    get_class_splits,
+    get_datasets,
+    get_pseudo_label_weights,
+    save_train_subset_selection,
+    select_images_by_anomaly_score,
+)
 from datasets.transform import get_transform, ContrastiveLearningViewGenerator
 from models.modules._MEBin import MEBin
 from utils.general_utils import AverageMeter, init_experiment
@@ -358,6 +364,7 @@ class AnomalyNCD():
         anomaly_map_file_dict = {}
         img_file_list = {}
         anomaly_crop_score_list = {}
+        anomaly_image_score_list = {}
 
         anomaly_type_list = sorted(os.listdir(f"{anomaly_map_path}/{product_name}/"))
 
@@ -421,6 +428,7 @@ class AnomalyNCD():
         # crop and save the images and masks
         for anomaly_type in anomaly_type_list:
             ano_type_score_list = {}
+            ano_type_image_score_list = {}
 
             save_path = f"{crop_output_path}/{product_name}/images/{anomaly_type}"
             save_mask_path = f"{crop_output_path}/{product_name}/masks/{anomaly_type}"
@@ -444,6 +452,9 @@ class AnomalyNCD():
                 anomaly_map = cv2.imread(anomaly_map_file_path, cv2.IMREAD_GRAYSCALE)
                 image = cv2.imread(image_path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                image_prefix = os.path.splitext(os.path.basename(image_path))[0]
+                # 论文定义 image-level anomaly score 为 anomaly probability map 的最大值。
+                ano_type_image_score_list[image_prefix] = float(np.max(anomaly_map))
                 binary_map = cv2.imread(binary_map_file_path)
                 binary_map = cv2.cvtColor(binary_map, cv2.COLOR_BGR2GRAY)
                 sub_images_list, sub_masks_list, anomaly_crop_score = bin.crop_sub_image_mask(image=image, mask=binary_map, anomaly_map=anomaly_map, est_anomaly_num=est_ano_num)
@@ -458,12 +469,41 @@ class AnomalyNCD():
                     ano_type_score_list["{}_crop{}.png".format(prefix, i)] = anomaly_crop_score[i]/255.0
 
             anomaly_crop_score_list[anomaly_type] = ano_type_score_list
+            anomaly_image_score_list[anomaly_type] = ano_type_image_score_list
 
         os.makedirs(f"{crop_output_path}/scores_json", exist_ok=True)
 
         # dump json file
         with open(f"{crop_output_path}/scores_json/{product_name}.json", "w") as f:
             json.dump(anomaly_crop_score_list, f)
+
+        if getattr(self.args, "use_train_subset", False):
+            selected, stats = select_images_by_anomaly_score(
+                anomaly_image_score_list,
+                ratio=self.args.train_subset_ratio,
+                normal_class=self.args.train_subset_normal_class,
+            )
+            selection_path = os.path.join(crop_output_path, "selection_json", f"{product_name}.json")
+            save_train_subset_selection(
+                selection_path,
+                selected=selected,
+                stats=stats,
+                ratio=self.args.train_subset_ratio,
+                normal_class=self.args.train_subset_normal_class,
+            )
+            for anomaly_type, type_stats in stats.items():
+                print(
+                    "train subset [{}] total={} selected={} ratio={:.3f} direction={} "
+                    "score_range=[{}, {}]".format(
+                        anomaly_type,
+                        type_stats["total"],
+                        type_stats["selected"],
+                        type_stats["actual_ratio"],
+                        type_stats["direction"],
+                        type_stats["score_min"],
+                        type_stats["score_max"],
+                    )
+                )
 
 
 
