@@ -13,6 +13,12 @@
 import argparse
 import os
 import random
+import sys
+
+# 与 examples/anomalyncd_main.py 保持一致：直接以 python examples/xxx.py 运行脚本时，
+# Python 仅会把脚本所在目录 examples/ 加入 sys.path，这里把仓库根目录也加入，
+# 保证 from models... 等顶层包能正常导入。
+sys.path.append(os.getcwd())
 
 import numpy as np
 import torch
