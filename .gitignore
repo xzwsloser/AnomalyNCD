@@ -1,0 +1,29 @@
+# ---------- 论文与参考实现（体积大，暂不入库） ----------
+papers/
+reference/
+
+# ---------- 数据与中间产物（不入库） ----------
+data/
+*.zip
+*.tar
+*.tar.gz
+
+# ---------- 训练/推理输出 ----------
+outputs/
+experiments/
+wandb/
+
+# ---------- 模型文件与可视化结果 ----------
+*.pt
+*.pth
+*.ckpt
+
+# ---------- Python 缓存与 IDE ----------
+__pycache__/
+*.pyc
+.ropeproject/
+.idea/
+.vscode/
+
+# ---------- 服务器/敏感信息（不入库） ----------
+server_private.private.md

@@ -39,7 +39,6 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-
 class AnomalyNCD():
     def __init__(self, args):
         self.args = args
@@ -55,14 +54,14 @@ class AnomalyNCD():
 
         setup_seed(self.args.seed)
         self.args.base_category = self.args.base_data_path.split('/')[-1]
-        self.args.num_labeled_classes = len(self.args.train_classes)         
-        self.args.num_unlabeled_classes = len(self.args.unlabeled_classes)  
+        self.args.num_labeled_classes = len(self.args.train_classes)
+        self.args.num_unlabeled_classes = len(self.args.unlabeled_classes)
         self.args.image_size = 224
         self.args.feat_dim = 768
         self.args.num_mlp_layers = 3
         self.args.mlp_out_dim = self.args.num_labeled_classes + self.args.num_unlabeled_classes
         self.args.interpolation = 3
-        self.args.crop_pct = 0.875 
+        self.args.crop_pct = 0.875
 
         init_experiment(self.args, runner_name=[self.args.runner_name])
 
@@ -73,11 +72,11 @@ class AnomalyNCD():
         self.train_loader, self.test_loader = self.load_datasets()
 
         self.args.logger.info('model build')
-    
+
 
     def load_model(self):
         """
-        Load the model consisting of Mask-Guided Vision Transformer (MGViT) and projector 
+        Load the model consisting of Mask-Guided Vision Transformer (MGViT) and projector
         """
 
         # load MGViT model
@@ -91,9 +90,9 @@ class AnomalyNCD():
                 block_num = int(name.split('.')[1])
                 if block_num >= self.args.grad_from_block:
                     m.requires_grad = True
-                    
+
         # load projector
-        projector = MultiHead(in_dim=self.args.feat_dim, out_dim=self.args.mlp_out_dim, nlayers=self.args.num_mlp_layers, n_head=self.args.n_head)
+        projector = MultiHead(in_dim=self.args.feat_dim, out_dim=self.args.mlp_out_dim, nlayers=self.args.num_mlp_layers, n_head=self.args.n_head, use_etf=self.args.use_etf)
 
         model = nn.Sequential(MGViT, projector).to(self.device)
 
@@ -128,7 +127,7 @@ class AnomalyNCD():
 
 
     def sub_image_predict(self, epoch, save_name, loss_list):
-        """                                                                                        
+        """
         Predict cropped sub-images and calculate NMI, ARI, and F1 scores.
         Args:
             epoch: [int]. Current epoch.
@@ -161,7 +160,7 @@ class AnomalyNCD():
                     sof_logit[:, :self.args.num_labeled_classes] = 0
                     sof_logit[:, self.args.num_labeled_classes:] /= sof_logit[:, self.args.num_labeled_classes:].sum(dim=-1, keepdim=True)
                     preds_dict[i].extend(sof_logit.argmax(1).cpu().numpy())
-                    
+
                 targets.append(label.cpu().numpy())
                 idxs.append(uq_idx.cpu().numpy())
                 img_paths.extend(image_path)
@@ -188,13 +187,13 @@ class AnomalyNCD():
             # Log results if it's the min loss head
             if i in min_indices:
                 self.args.logger.info('NMI {:.4f} | ARI {:.4f} | F1 {:.4f}'.format(NMI, ARI, F1))
-        
+
         return result_dict_ls
-    
+
 
     def region_merge_predict(self, epoch, save_name, loss_list):
-        """                                                                                        
-        Weights each sub-image's prediction according to the anomaly area and merges them to obtain the final image prediction, 
+        """
+        Weights each sub-image's prediction according to the anomaly area and merges them to obtain the final image prediction,
         followed by calculating the NMI, ARI, and F1 scores.
         Args:
             epoch: [int]. Current epoch.
@@ -221,18 +220,18 @@ class AnomalyNCD():
 
         # Iterate over test data loader to process each batch of sub-images
         for batch_idx, batch in enumerate(tqdm(self.test_loader)):
-            images, labels, uq_idx, image_path, masks_img, mask_paths = batch                      
+            images, labels, uq_idx, image_path, masks_img, mask_paths = batch
             images = images.cuda(non_blocking=True)
             masks_img = masks_img.cuda(non_blocking=True)
-        
+
 
             with torch.no_grad():
                 MGViT, projector = self.model
                 cls_token = MGViT(images, masks_img)
                 _, logits = projector(cls_token)
-                                                                                     
-                logits = torch.stack(logits).permute(1,0,2)                                                        
-                for label, idx, path, logit, mask_path in zip(labels, uq_idx, image_path, logits, mask_paths):                            
+
+                logits = torch.stack(logits).permute(1,0,2)
+                for label, idx, path, logit, mask_path in zip(labels, uq_idx, image_path, logits, mask_paths):
                     last_1 = os.path.basename(path)
                     last_2 = os.path.basename(os.path.dirname(path))
                     split = last_1.split("_crop")[0]
@@ -244,15 +243,15 @@ class AnomalyNCD():
                     test_dict[name]["mask_path"].append(mask_path)
                     mask = label in range(len(self.args.train_classes))
                     test_dict[name]["mask"].append(mask)
-                    
+
                     sof_logit = F.softmax(logit / 0.1, dim=-1)
 
                     if not mask :
                         sof_logit[:, :self.args.num_labeled_classes] = 0
                         sof_logit[:, self.args.num_labeled_classes:] /= sof_logit[:, self.args.num_labeled_classes:].sum(dim=-1, keepdim=True)
                     for i in range(self.args.n_head):
-                        test_dict[name]["logit{}".format(i)].append(sof_logit[i])       
-                            
+                        test_dict[name]["logit{}".format(i)].append(sof_logit[i])
+
         # Compute the weighted predictions based on anomaly area
         for name, data in test_dict.items():
             for i in range(self.args.n_head):
@@ -280,7 +279,7 @@ class AnomalyNCD():
                     area_average_preds = []
                     for id in range(len(temps)):
                         area_average_preds.append(torch.argmax(area_average_logits[id]))
-                
+
                     for id in range(len(temps)):
                         test_dict[name]["area_average_pred{}_temp{}".format(i, id)].append(area_average_preds[id])
 
@@ -290,7 +289,7 @@ class AnomalyNCD():
             masks = np.append(masks, data["mask"][0])
             img_paths = np.append(img_paths, img_path)
             idxs = np.append(idxs, data["idx"][0].item())
-        
+
         # Evaluate predictions for each head and temperature
         for i in range(self.args.n_head):
             area_average_preds_ls = [np.array([]) for _ in range(len(temps))]
@@ -298,7 +297,7 @@ class AnomalyNCD():
             for img_path, data in test_dict.items():
                 for idk in range(len(temps)):
                     area_average_preds_ls[idk] = np.append(area_average_preds_ls[idk], data["area_average_pred{}_temp{}".format(i, idk)][0].item())
-            
+
 
             # Calculate performance metrics for area-weighted predictions
             for temp_idx, temp in enumerate(temps):
@@ -307,7 +306,7 @@ class AnomalyNCD():
                                                             y_true=targets, y_pred=area_average_preds_ls[temp_idx], mask=masks,
                                                             T=epoch, save_name=save_name,
                                                             args=self.args, idxs=idxs, img_paths=img_paths)
-                
+
                 # Log metrics and store results if it's the min loss head
                 if i in min_indices:
                     result_dict_area = result_dict
@@ -324,16 +323,16 @@ class AnomalyNCD():
                                 writer = csv.writer(file)
                                 writer.writerow(['category', 'NMI', 'ARI', 'F1'])
                                 writer.writerow([self.args.category, NMI, ARI, F1])
-                        
+
                         # else write after the csv
                         else:
                             with open(filename, 'a') as file:
                                 writer = csv.writer(file)
                                 writer.writerow([self.args.category, NMI, ARI, F1])
 
-        return result_dict_area, head_idx 
-    
-    
+        return result_dict_area, head_idx
+
+
     def binarization(self):
         """
         Use MEBin to binarize the anomaly maps and crop the images and masks.
@@ -379,7 +378,7 @@ class AnomalyNCD():
 
             anomaly_map_file_dict[anomaly_type] = [os.path.join(anomaly_map_file_path, path) for path in tmp_anomaly_map_file_list]
             img_file_list[anomaly_type] = [os.path.join(img_file_path, path) for path in tmp_img_file_list]
-            
+
         # dict -> list
         anomaly_map_file_list = []
         for anomaly_type in anomaly_type_list:
@@ -400,7 +399,7 @@ class AnomalyNCD():
             for anomaly_map_file in anomaly_type_anomaly_map_file_list:
                 idx = anomaly_map_file_list.index(anomaly_map_file)
                 binarized_maps[anomaly_type].append(binarized_maps_list[idx])
-                est_anomaly_nums[anomaly_type].append(est_anomaly_nums_list[idx])            
+                est_anomaly_nums[anomaly_type].append(est_anomaly_nums_list[idx])
 
         # save the binarization result
         for anomaly_type in anomaly_type_list:
@@ -434,7 +433,7 @@ class AnomalyNCD():
             anomaly_type_anomap_files = anomaly_map_file_dict[anomaly_type]
             anomaly_type_est_anomaly_nums = est_anomaly_nums[anomaly_type]
 
-            
+
             for i in range(len(anomaly_type_img_files)):
                 image_path = anomaly_type_img_files[i]
                 anomaly_map_file_path = anomaly_type_anomap_files[i]
@@ -449,15 +448,15 @@ class AnomalyNCD():
                 binary_map = cv2.cvtColor(binary_map, cv2.COLOR_BGR2GRAY)
                 sub_images_list, sub_masks_list, anomaly_crop_score = bin.crop_sub_image_mask(image=image, mask=binary_map, anomaly_map=anomaly_map, est_anomaly_num=est_ano_num)
                 prefix = image_path.split('/')[-1].split('.')[0]
-                for i, img in enumerate(sub_images_list): 
+                for i, img in enumerate(sub_images_list):
                     img.save(os.path.join(save_path, "{}_crop{}.png".format(prefix, i)))
-                for i, img in enumerate(sub_masks_list): 
+                for i, img in enumerate(sub_masks_list):
                     img.save(os.path.join(save_mask_path, "{}_crop{}.png".format(prefix, i)))
 
                 # save the anomaly score for each sub-image
                 for i, score in enumerate(anomaly_crop_score):
                     ano_type_score_list["{}_crop{}.png".format(prefix, i)] = anomaly_crop_score[i]/255.0
-            
+
             anomaly_crop_score_list[anomaly_type] = ano_type_score_list
 
         os.makedirs(f"{crop_output_path}/scores_json", exist_ok=True)
@@ -466,7 +465,7 @@ class AnomalyNCD():
         with open(f"{crop_output_path}/scores_json/{product_name}.json", "w") as f:
             json.dump(anomaly_crop_score_list, f)
 
-                    
+
 
     def MGRL(self, epoch, optimizer, cluster_criterion):
         """
@@ -489,7 +488,7 @@ class AnomalyNCD():
 
         self.model.train()
         for batch_idx, batch in enumerate(self.train_loader):
-            images, class_labels, image_path, masks, mask_path  = batch               
+            images, class_labels, image_path, masks, mask_path  = batch
 
             # Generate pseudo-label weights for pseudo-label correction.
             sample_weights, mask_lab = get_pseudo_label_weights(image_path, self.args.anomaly_thred, self.args.base_category, anomaly_score_json)
@@ -522,7 +521,7 @@ class AnomalyNCD():
                 sup_con_labels = class_labels[mask_lab]
                 sup_con_loss = SupConLoss()(student_proj, labels=sup_con_labels)
 
-                # classification loss                    
+                # classification loss
                 n_head = len(student_out)
                 cls_loss = 0
                 cluster_loss = 0
@@ -530,10 +529,10 @@ class AnomalyNCD():
                 for i in range(n_head):
                     student_out_i = student_out[i]
                     teacher_out_i = teacher_out[i]
-                    sup_logits = torch.cat([f[mask_lab] for f in (student_out_i / 0.1).chunk(2)], dim=0)  
-                    sup_labels = torch.cat([class_labels[mask_lab] for _ in range(2)], dim=0) 
+                    sup_logits = torch.cat([f[mask_lab] for f in (student_out_i / 0.1).chunk(2)], dim=0)
+                    sup_labels = torch.cat([class_labels[mask_lab] for _ in range(2)], dim=0)
                     cls_loss += nn.CrossEntropyLoss()(sup_logits, sup_labels)
-                    
+
                     # pseudo label classification loss
                     student_out_unlabel = torch.cat([f[~mask_lab] for f in (student_out_i).chunk(2)], dim=0)
                     teacher_out_unlabel = torch.cat([f[~mask_lab] for f in (teacher_out_i).chunk(2)], dim=0)
@@ -543,11 +542,11 @@ class AnomalyNCD():
                     head_cluster_loss = cluster_criterion(student_out_unlabel, teacher_out_unlabel, epoch, sample_weights)+ self.args.memax_weight * me_max_loss
                     cluster_loss += head_cluster_loss
                     cluster_loss_for_test[i].append(head_cluster_loss.item())
-                    
+
                 cls_loss /= n_head
                 cluster_loss /= n_head
 
-                
+
                 pstr += f'cls_loss: {cls_loss.item():.4f} '
                 pstr += f'cluster_loss: {cluster_loss.item():.4f} '
                 pstr += f'sup_con_loss: {sup_con_loss.item():.4f} '
@@ -556,7 +555,7 @@ class AnomalyNCD():
                 loss = 0
                 loss += (1 - self.args.sup_weight) * cluster_loss + self.args.sup_weight * cls_loss
                 loss += (1 - self.args.sup_weight) * contrastive_loss + self.args.sup_weight * sup_con_loss
-                
+
                 # Train acc
                 loss_record.update(loss.item(), class_labels.size(0))
                 optimizer.zero_grad()
@@ -570,18 +569,18 @@ class AnomalyNCD():
                     self.args.logger.info('Epoch: [{}][{}/{}]\t loss {:.5f}\t {}'
                                 .format(epoch, batch_idx, len(self.train_loader), loss.item(), pstr))
 
-                
+
                 cluster_loss_head = [0]*self.args.n_head
                 for i in range(self.args.n_head):
                     cluster_loss_head[i] = np.mean(cluster_loss_for_test[i])
-                    
+
         return cluster_loss_head, loss_record
 
 
     def main(self):
         # Main Element Binarization: generate the binarized results for unlabeled images and apply the Anomaly-Centered Sub-Image Cropping operation.
         self.binarization()
-        
+
         # training the model
         self.train_init()
 

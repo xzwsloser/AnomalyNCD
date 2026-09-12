@@ -54,6 +54,7 @@ def load_args(cfg, args):
     args.mask_layers = cfg['models']['mask_layers']
     args.n_views = cfg['models']['n_views']
     args.n_head = cfg['models']['n_head']
+    args.use_etf = cfg['models']['use_etf']
     # ----------------------
     # training setting
     # ----------------------
