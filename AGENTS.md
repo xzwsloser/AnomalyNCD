@@ -13,6 +13,8 @@
 3. 每一个任务在 `plans/` 与 `sessions/` 下各维护一个 `index.md`，用于建立「任务 → 文档」的索引关系。
 4. 任务只在用户通过 prompt 明确「创建 / 执行某个任务」时才新建，不要在每次会话中自动新增任务。
 5. 每个任务在 `plans/` 与 `sessions/` 下各维护 **一份** `taskN_plan.md` / `taskN_session.md`。同一任务的多轮修改（不同会话、多次执行）**不新建独立版本文件**，而是在同一份文档内通过「修改记录 / 更新记录」小节区分每一次改动，并同步更新对应 `index.md`。
+6. coding agent 开始工作前必须先用 `git branch --show-current` 确认当前任务分支。分支名 `feat_taskN` 只允许维护对应的 `taskN_plan.md` 与 `taskN_session.md`；后续分析、修复、文档同步、治理修复等同一任务的后续轮次都必须继续写入这两个文件。
+7. 如果发现任务内容被误记到其他 `taskM_*` 文档（`M != N`），必须把内容合并回当前分支对应的 `taskN_*` 文档，删除误建文件，并同步清理 `plans/index.md` 与 `sessions/index.md`，避免治理文档漂移。
 
 ### 1.2 目录与命名约定
 
@@ -142,6 +144,7 @@ AnomalyNCD/
 - 服务器仓库位于 `~/anomaly_ncd/AnomalyNCD`，每个任务在独立分支上完成（Task1 已有 `feat_task_1` 分支）。
 - 建议分支命名：`feat_taskN`（如 `feat_task_1`、`feat_task_2`）。
 - 所有任务共享**同一个工作区**，通过在同一个 repo 内 `git checkout` 切换分支。
+- 在 `feat_taskN` 分支上执行任务前，必须确认只维护 `plans/taskN_plan.md` 和 `sessions/taskN_session.md` 这一对当前任务文档；不得在该分支新增其他任务的 plan/session，也不得因多轮修改新建额外编号或版本文件。
 
 ### 7.3 避免重复下载 / 磁盘浪费（磁盘仅剩约 30GB）
 - 大体积数据（MVTec、AeBAD、anomaly maps、MEBin 中间产物）放**共享 untracked 路径**，不要放进某个分支提交。

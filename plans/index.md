@@ -5,7 +5,7 @@
 | 任务 | 文档 | 状态 | 创建时间 |
 | --- | --- | --- | --- |
 | 任务1 | `plans/task1_plan.md` | 已 review；ETF 模块 + 训练前 t-SNE，多轮修复已并入文件 | 2026-09-12 |
-| 任务2 | `plans/task2_plan.md` | 已 review；代码实现完成，服务器实验待执行 | 2026-09-12 |
+| 任务2 | `plans/task2_plan.md` | 已 review；代码实现与实验二数据补充分析完成 | 2026-09-12 |
 | 任务3 | `plans/task3_plan.md` | 已 review；按更新范围完成日志与 CSV 下载，取消 zip 下载 | 2026-09-13 |
 
 ## 使用约定
