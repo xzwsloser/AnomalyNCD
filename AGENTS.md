@@ -81,6 +81,7 @@ AnomalyNCD/
 | --- | --- | --- | --- |
 | `papers/2410.14379v2.pdf` | *AnomalyNCD: Towards Novel Anomaly Class Discovery in Industrial Scenarios*（arXiv:2410.14379） | 主仓库对应论文，方法、实验与消融说明可结合 `README.md` 阅读 | 本仓库 `models/` |
 | `papers/2308.02989v3.pdf` | *Novel Class Discovery for Long-tailed Recognition*（NCDLR，TMLR 2023，arXiv:2308.02989） | 提出 equiangular（等角）prototype 的 ETF 分类头，用于长尾场景的类别发现 | `reference/NCDLR/` |
+| `papers/Banerjee_AMEND_Adaptive_Margin_and_Expanded_Neighborhood_for_Efficient_Generalized_Category_WACV_2024_paper.pdf` | *AMEND: Adaptive Margin and Expanded Neighborhood for Efficient Generalized Category Discovery*（WACV 2024） | 提出 expanded neighborhood 对比学习与 adaptive margin prototype 正则，用于广义类别发现 | Task3 计划新增实现：`models/amend.py` 与 `models/loss/_amend_loss.py`（当前尚未创建） |
 
 - **ETF 模块**：`reference/NCDLR/nets/vit.py` 中的 `ETF_Classifier`（含 `generate_random_orthogonal_matrix`），构造等角分类 prototype 矩阵 `ori_M`，前向时对特征归一化后与 `ori_M` 做矩阵乘法得到 logits。当前主仓库的 `models/modules/_classifier.py` 已在 Task1 中接入 ETF，可通过 `models.use_etf` 配置启用。
 - 主仓库自身对应论文 *AnomalyNCD*（arXiv:2410.14379）的 PDF 已存放在 `papers/2410.14379v2.pdf`，方法说明同时参考 `README.md`。
