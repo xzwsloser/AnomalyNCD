@@ -5,6 +5,8 @@
 | 时间 | 修改说明 |
 | --- | --- |
 | 2026-09-13 | 根据飞书任务三要求重写计划：明确 AMEND 代码适配、MEBin 输入输出兼容、损失实现、实验设置与验证方式。 |
+| 2026-09-14 | 复核飞书文档 revision 716、AMEND 论文与当前代码：修正直接邻居默认值与损失实现口径，明确与 AnomalyNCD 兼容时保持的超参数偏差，并补充规划阶段 session 记录。 |
+| 2026-09-15 | 执行代码实现与本地验证；服务器 bottle smoke test 暴露 projector 权重设备迁移问题，已改为动态获取 `last_layer` 分类器并记录待复跑。 |
 
 ## 目标
 
@@ -26,12 +28,14 @@ AMEND 论文全文没有给出官方代码仓库、项目页或 supplementary �
 
 论文 PDF：`papers/Banerjee_AMEND_Adaptive_Margin_and_Expanded_Neighborhood_for_Efficient_Generalized_Category_WACV_2024_paper.pdf`。
 
-1. **Neighborhood loss**：对 l2 normalized projection 特征 `z` 维护 feature bank；对每个 anchor 取 top-N 直接邻居，按公式 (1) 计算直接邻域对比损失。
-2. **Expanded neighborhood loss**：对每个直接邻居再检索 top-M 二级邻居；重复出现的二级邻居保留重复次数，使更近的邻域获得更大亲和度。按公式 (2)(3) 以 `lambda_en=0.1` 加权。
-3. **Adaptive Margin loss**：分类原型 l2 normalized 后，按公式 (6)(7) 奖励类间距离、惩罚过于接近的原型对；`lambda_am=1.0`。
-4. **分类损失**：labelled 样本用监督分类损失，unlabelled 样本用 teacher soft pseudo-label 与 mean-entropy regularizer；paper 使用 ViT-DINO 主干、三层 MLP projection（输出 256 维）、feature bank 容量 2048、直接邻居数 N=5、扩展邻居数 M=5。
+1. **Neighborhood loss**：对 l2 normalized projection 特征 `z` 维护 feature bank；对每个 anchor 从 bank 取 top-N 直接邻居，按论文公式 (1) 计算直接邻域对比损失。
+2. **Expanded neighborhood loss**：对每个直接邻居再从 bank 检索 top-M 二级邻居；扩展邻居列表保留重复项，使重复出现的近邻对损失产生更大贡献。按论文公式 (2)(3) 以 `lambda_en=0.1` 加权。
+3. **Adaptive Margin loss**：分类原型 l2 normalized 后，按论文公式 (6)(7) 惩罚过于接近的原型对；`lambda_am=1.0`。
+4. **分类损失**：labelled 样本用监督分类损失，unlabelled 样本用 teacher soft pseudo-label 与 mean-entropy regularizer；AMEND 使用 ViT-DINO 主干、三层 MLP projection（输出 256 维）、feature bank 容量 2048、扩展邻居数 M=5。论文中 fine-grained benchmark 的直接邻居数为 N=4，coarse-grained benchmark 才使用 N=5；MVTec 子图像更接近细粒度场景，因此本任务默认采用 N=4。
 
 AMEND 论文默认训练 200 epochs。本任务为了与 AnomalyNCD baseline 可比，采用仓库现有 `epochs=50`，不照搬论文 200 epochs；AMEND 特有超参数按论文设置。
+
+**兼容性超参口径**：为了把实验差异限制在 AMEND 的两个核心模块，不改变 AnomalyNCD 的训练协议，本任务继续使用 `sup_weight=0.3` 与 `memax_weight=4`，不照搬论文中的 `lambda=0.35` 与 `epsilon=2`。这一偏差必须在实验分析中明确记录，避免被误解为严格复现 AMEND。
 
 ## 改动方案
 
@@ -39,12 +43,11 @@ AMEND 论文默认训练 200 epochs。本任务为了与 AnomalyNCD baseline 可
 
 | 文件 | 修改内容 |
 | --- | --- |
-| `models/amend.py` | 新增 `AMEND(AnomalyNCD)` runner。复用 `train_init()` 的数据/模型/日志初始化和 `main()` 的训练、保存、评估流程；只重写 `MGRL()`，保持 AnomalyNCD 的输入输出接口。该文件是论文方法在本仓库中的复现实现。 |
+| `models/amend.py` | 新增 `AMEND(AnomalyNCD)` runner。复用 `train_init()` 的数据/模型/日志初始化和 `main()` 的训练、保存、评估流程；重写 `load_model()` 与 `MGRL()`，保持 AnomalyNCD 的输入输出接口。该文件是论文方法在本仓库中的复现实现。 |
 | `models/loss/_amend_loss.py` | 新增 `AMENDNeighborhoodLoss` 与 `AdaptiveMarginLoss`。前者维护 2048 容量 FIFO feature bank，从 bank 检索 top-N/top-M 邻居并用 mini-batch 作 negatives；后者从 projector 原型计算 adaptive margin。损失公式来源均为 AMEND 论文，不引用不存在的官方代码。 |
-| `configs/AnomalyNCD_amend.yaml` | 在原配置基础上新增 `amend:` 配置块：`neighbors=5`、`expanded_neighbors=5`、`bank_size=2048`、`expanded_affinity=0.1`、`margin_weight=1.0`、`projection_dim=256`；`n_head` 设为 `1`，其余训练/MEBin 参数保持原配置。 |
+| `configs/AnomalyNCD_amend.yaml` | 在原配置基础上新增 `amend:` 配置块：`neighbors=4`、`expanded_neighbors=5`、`bank_size=2048`、`expanded_affinity=0.1`、`margin_weight=1.0`、`projection_dim=256`；`n_head` 设为 `1`，其余训练/MEBin 参数保持原配置。 |
 | `examples/amend_main.py` | 新增命令入口，参数与 `examples/anomalyncd_main.py` 保持一致，仅加载 `models.amend.AMEND`。 |
 | `scripts/anomalyncd_task3.sh` | 新增 MVTec 15 类批量实验脚本，数据路径与 Task2 脚本一致，输出目录命名为 `mvtec_musc_crop_task3_amend`。 |
-| `AGENTS.md` | 在论文索引表中补充 AMEND 论文条目，标注 Task3 计划新增实现位置。 |
 | `plans/index.md` | 更新任务3状态为“待 review”。 |
 
 ### 数据接口约定
@@ -75,10 +78,11 @@ loss
 
 Feature bank 细节：
 
-1. 每个训练 step 将 batch 中两个 view 的 `x_proj` 做 L2 normalization 后写入 2048 容量 FIFO bank。
-2. 直接邻居与扩展邻居只从历史 feature bank 检索；当前 batch 特征只作为 negatives，并排除同一原图的不同增强 view。
+1. 每个训练 step 将 batch 中两个 view 的 `x_proj` 做 L2 normalization 后写入 2048 容量 FIFO bank。projection 输出维度 256 通过 `amend.projection_dim` 显式传入，便于检查论文设置。
+2. 直接邻居与扩展邻居只从历史 feature bank 检索；denominator 的 negatives 只取当前 mini-batch 的两份 view 特征，并排除同一原图的另一个增强 view，避免把潜在正样本当 negatives。实现时需按 crop 文件名/原图 ID 判断同一原图。
 3. 对缺少足够邻居的 warmup 阶段：如果 bank 中邻居数少于 N/M，可用现有特征数执行，损失分母使用实际邻居数；bank 为空时该邻域项跳过。
-4. Adaptive Margin 使用第一个 head 的线性权重并先做 L2 normalization；该操作只影响损失，不改变 `MultiHead` 前向权重。
+4. AMEND 的分类前向与 Adaptive Margin 均对 prototype 做 L2 normalization，符合论文公式 (8)；baseline 的 `MultiHead` 行为保持不变。
+5. 日志中分别记录 direct neighborhood、expanded neighborhood、总和 neighborhood 和 adaptive margin 四项损失，便于后续解释指标变化，而不只记录总和。
 
 ## 实验设置
 
@@ -87,7 +91,7 @@ Feature bank 细节：
 | 数据集 | MVTec AD，15 类：`bottle, cable, capsule, carpet, grid, hazelnut, leather, metal_nut, pill, screw, tile, toothbrush, transistor, wood, zipper` |
 | MEBin 输入 | 复用 `data/mvtec_musc` 与 `data/mvtec_musc_crop`，不重复二值化和裁剪 |
 | 训练超参数 | `configs/AnomalyNCD.yaml` 中 `batch_size=32`、`epochs=50`、`lr=0.003`、`seed=3407` 保持不变 |
-| AMEND 超参数 | `neighbors=5`、`expanded_neighbors=5`、`bank_size=2048`、`expanded_affinity=0.1`、`margin_weight=1.0`、`projection_dim=256` |
+| AMEND 超参数 | `neighbors=4`、`expanded_neighbors=5`、`bank_size=2048`、`expanded_affinity=0.1`、`margin_weight=1.0`；projection 维度沿用 `MultiHead` 内置的 256 |
 | 对比 baseline | 优先复用服务器已有 baseline 结果；若无，则用原 `scripts/anomalyncd.sh` 补跑相同类别、seed 与 epoch |
 | 指标 | 子图像 NMI / ARI / F1，以及 region merged NMI / ARI / F1 |
 
@@ -119,6 +123,12 @@ df -h /
 3. smoke test 通过后批量运行 15 类；若共享 GPU 排队严重或磁盘余量不足，与用户确认后再缩减类别。
 4. 汇总每个类别的 baseline 与 AMEND 指标，计算 NMI/ARI/F1 的 per-category 与 mean 差异，并分析上升、下降或几乎不变的原因。
 5. 执行完成后更新 `sessions/task3_session.md` 与 `sessions/index.md`。
+
+## 分析口径
+
+1. 对比实验以“同一份 MEBin crop 数据 + 同一种子/epoch/评估协议 + 仅替换邻域对比与加入 adaptive margin”为主结论；明确记录 `sup_weight` 与 `memax_weight` 沿用 AnomalyNCD 而非 AMEND 论文设置。
+2. 分析上升/下降/几乎不变时，结合分项损失曲线判断：邻域损失可能提高实例一致性与局部聚类性，但错误邻居也可能强化错误正样本；adaptive margin 理论上应增大原型间隔，但可能改变分类边界。
+3. 不在主实验中网格搜索 `neighbors`、`expanded_neighbors` 或 `margin_weight`；如果 smoke test 暴露实现问题，先修复实现，不做选择性调参。
 
 ## 风险与依赖
 

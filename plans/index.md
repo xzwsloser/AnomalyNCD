@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | 任务1 | `plans/task1_plan.md` | 已 review；ETF 模块 + 训练前 t-SNE，多轮修复已并入文件 | 2026-09-12 |
 | 任务2 | `plans/task2_plan.md` | 已 review；代码实现完成，服务器实验待执行 | 2026-09-12 |
-| 任务3 | `plans/task3_plan.md` | 待 review；AMEND 代码适配 + MEBin 输入输出兼容 + MVTec 指标实验 | 2026-09-13 |
+| 任务3 | `plans/task3_plan.md` | 已 review；代码实现和本地验证完成，服务器 smoke test 待复跑 | 2026-09-13 |
 
 ## 使用约定
 - 计划文档必须在执行代码 **之前** 编写，并交由用户 review 通过后方可执行。
