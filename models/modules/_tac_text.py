@@ -39,32 +39,41 @@ def _resolve_device(device=None):
     return device
 
 
-def _load_clip_backend(device=None):
+def _load_clip_backend(device=None, pretrained_path=None):
     """加载 CLIP 文本/图像编码器，兼容 openai `clip` 与 `open_clip` 两种实现。
 
     TAC 文本对应构建依赖 CLIP 预训练模型（ViT-B/32）。优先使用 openai/CLIP
     官方的 `clip` 包；若未安装则回退到 `open_clip`（open_clip_torch）。两者均
     缺失时抛出带安装提示的 RuntimeError，避免在不透明的 ImportError 中崩溃。
 
+    若提供 `pretrained_path`（本地 CLIP 权重文件，如 `ViT-B-32.openai.pt` /
+    `ViT-B-32.pt`），则直接从本地文件加载，避免服务器离线时回退到 HF 在线下载
+    （对应服务器访问不到 huggingface.co 的报错）。
+
     返回 (clip_model, preprocess, tokenize, backend)，其中 tokenize 统一为
     `texts -> token Tensor` 的可调用对象，屏蔽不同实现 API 差异。
     """
     device = _resolve_device(device)
+    if pretrained_path and not os.path.isfile(pretrained_path):
+        raise FileNotFoundError(f"CLIP 本地权重文件不存在：{pretrained_path}")
+
     try:
         import clip  # openai/CLIP 官方包
 
-        clip_model, preprocess = clip.load("ViT-B/32", device=torch.device(device))
+        clip_name = pretrained_path if pretrained_path else "ViT-B/32"
+        clip_model, preprocess = clip.load(clip_name, device=torch.device(device))
         tokenize = lambda texts: clip.tokenize(texts, truncate=True)
-        backend = "clip"
+        backend = "clip(local)" if pretrained_path else "clip"
     except ImportError:
         try:
             import open_clip  # open_clip_torch 作为回退实现
 
+            # pretrained 传本地文件路径时不联网；否则才按默认名在线下载。
             clip_model, _, preprocess = open_clip.create_model_and_transforms(
-                "ViT-B-32", pretrained="openai")
+                "ViT-B-32", pretrained=pretrained_path or "openai")
             clip_model = clip_model.to(device).eval()
             tokenize = lambda texts: open_clip.tokenize(texts)
-            backend = "open_clip"
+            backend = "open_clip(local)" if pretrained_path else "open_clip"
         except ImportError:
             raise RuntimeError(
                 "未找到 CLIP 实现：缺失 `clip`（openai/CLIP）与 `open_clip`"
@@ -213,7 +222,7 @@ def retrieve_text(image_feats, selected_nouns, tau=0.005, device=None):
 def build_or_load(novel_image_root, base_image_root, category, out_root,
                   top_k=5, tau=0.005, cluster_num=None,
                   noun_csv='reference/2024-ICML-TAC/data/WordNetNouns.csv',
-                  device=None):
+                  device=None, pretrained_path=None):
     """为该 category 的全部子图生成文本对应特征并落盘；已存在则直接返回。
 
     落盘格式（is_distributed 无关，共享 untracked 路径）：
@@ -228,6 +237,9 @@ def build_or_load(novel_image_root, base_image_root, category, out_root,
         return npy_path, json_path
 
     device = _resolve_device(device)
+    # 允许通过环境变量 CLIP_CHECKPOINT 指定本地权重，未指定则走在线路径。
+    if pretrained_path is None:
+        pretrained_path = os.environ.get("CLIP_CHECKPOINT")
 
     paths = collect_image_paths(novel_image_root, base_image_root)
     if len(paths) == 0:
@@ -237,7 +249,8 @@ def build_or_load(novel_image_root, base_image_root, category, out_root,
         )
 
     # 仅在真正需要生成文本特征时按需加载 CLIP（clip / open_clip 均可）。
-    clip_model, clip_preprocess, tokenize, _ = _load_clip_backend(device)
+    clip_model, clip_preprocess, tokenize, _ = _load_clip_backend(
+        device, pretrained_path=pretrained_path)
 
     # --- Text Counterpart Construction：图像特征 / 名词特征 / 名词筛选 / 文本检索 ---
     image_feats = encode_images(paths, clip_model, clip_preprocess, device)
