@@ -39,6 +39,44 @@ def _resolve_device(device=None):
     return device
 
 
+def _load_clip_backend(device=None):
+    """加载 CLIP 文本/图像编码器，兼容 openai `clip` 与 `open_clip` 两种实现。
+
+    TAC 文本对应构建依赖 CLIP 预训练模型（ViT-B/32）。优先使用 openai/CLIP
+    官方的 `clip` 包；若未安装则回退到 `open_clip`（open_clip_torch）。两者均
+    缺失时抛出带安装提示的 RuntimeError，避免在不透明的 ImportError 中崩溃。
+
+    返回 (clip_model, preprocess, tokenize, backend)，其中 tokenize 统一为
+    `texts -> token Tensor` 的可调用对象，屏蔽不同实现 API 差异。
+    """
+    device = _resolve_device(device)
+    try:
+        import clip  # openai/CLIP 官方包
+
+        clip_model, preprocess = clip.load("ViT-B/32", device=torch.device(device))
+        tokenize = lambda texts: clip.tokenize(texts, truncate=True)
+        backend = "clip"
+    except ImportError:
+        try:
+            import open_clip  # open_clip_torch 作为回退实现
+
+            clip_model, _, preprocess = open_clip.create_model_and_transforms(
+                "ViT-B-32", pretrained="openai")
+            clip_model = clip_model.to(device).eval()
+            tokenize = lambda texts: open_clip.tokenize(texts)
+            backend = "open_clip"
+        except ImportError:
+            raise RuntimeError(
+                "未找到 CLIP 实现：缺失 `clip`（openai/CLIP）与 `open_clip`"
+                "（open_clip_torch）。请先在服务器安装其一，例如：\n"
+                "  pip install git+https://github.com/openai/CLIP.git   # openai clip\n"
+                "  pip install open_clip_torch                          # open_clip\n"
+                "文本对应特征是 Task4/5 的离线前置步骤，还需 faiss 与 CLIP 权重可访问。"
+            ) from None
+    clip_model.eval()
+    return clip_model, preprocess, tokenize, backend
+
+
 def collect_image_paths(novel_image_root, base_image_root):
     """按 Dataset_AnomalyNCD 的目录约定收集该 category 下所有子图路径。
 
@@ -77,10 +115,8 @@ def encode_images(paths, clip_model, clip_preprocess, device=None, batch_size=51
     return np.concatenate(feats, axis=0)
 
 
-def encode_nouns(clip_model, noun_csv, device=None, batch_size=4096):
+def encode_nouns(clip_model, tokenize, noun_csv, device=None, batch_size=4096):
     """CLIP 编码 WordNet 名词表（7 个 prompt 模板平均），对应 TAC text_embedding.py。"""
-    import clip
-
     device = _resolve_device(device)
     with open(noun_csv, 'r', encoding='utf-8') as f:
         words = [row['word'] for row in csv.DictReader(f)]
@@ -93,7 +129,7 @@ def encode_nouns(clip_model, noun_csv, device=None, batch_size=4096):
         for i in range(0, len(words), batch_size):
             chunk = words[i:i + batch_size]
             prompts = [SIMPLE_IMAGENET_TEMPLATES[index](w) for w in chunk]
-            text = clip.tokenize(prompts, truncate=True).to(device)
+            text = tokenize(prompts).to(device)
             with torch.no_grad():
                 f = clip_model.encode_text(text).float().cpu().numpy()
             batch_feats.append(f)
@@ -192,7 +228,6 @@ def build_or_load(novel_image_root, base_image_root, category, out_root,
         return npy_path, json_path
 
     device = _resolve_device(device)
-    import clip  # 仅在真正需要生成文本特征时引入
 
     paths = collect_image_paths(novel_image_root, base_image_root)
     if len(paths) == 0:
@@ -201,12 +236,12 @@ def build_or_load(novel_image_root, base_image_root, category, out_root,
             f"base_root={base_image_root}"
         )
 
-    clip_model, clip_preprocess = clip.load("ViT-B/32", device=torch.device(device))
-    clip_model.eval()
+    # 仅在真正需要生成文本特征时按需加载 CLIP（clip / open_clip 均可）。
+    clip_model, clip_preprocess, tokenize, _ = _load_clip_backend(device)
 
     # --- Text Counterpart Construction：图像特征 / 名词特征 / 名词筛选 / 文本检索 ---
     image_feats = encode_images(paths, clip_model, clip_preprocess, device)
-    nouns_feats = encode_nouns(clip_model, noun_csv, device)
+    nouns_feats = encode_nouns(clip_model, tokenize, noun_csv, device)
 
     if cluster_num is None or int(cluster_num) <= 0:
         # 默认取该 category 的 novel 缺陷类别数作为图像聚类中心数。
