@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 from copy import deepcopy
 import numpy as np
@@ -25,6 +26,8 @@ class Dataset_AnomalyNCD(torch.utils.data.Dataset):
         transform=None,
         target_transform=None,
         imagesize=224,
+        use_text_feat=False,
+        text_feat_root=None,
         **kwargs,
     ):
         """
@@ -46,6 +49,14 @@ class Dataset_AnomalyNCD(torch.utils.data.Dataset):
         self.transform = transform
         self.target_transform = target_transform
 
+        # Task4/5：可选文本对应特征。use_text_feat 启用时按 novel_class 加载
+        # {text_feat_root}/{novel_class}.npy + _image_paths.json，供 __getitem__ 反查。
+        self.use_text_feat = use_text_feat
+        self.text_feat_root = text_feat_root
+        self.text_feat_dict = {}
+        if self.use_text_feat:
+            self.text_feat_dict = self._load_text_features(self.text_feat_root)
+
         self.imgpaths_per_class, self.data_to_iterate = self.get_image_data()
 
         self.uq_idxs = np.array(range(len(self)))
@@ -63,11 +74,40 @@ class Dataset_AnomalyNCD(torch.utils.data.Dataset):
         if self.target_transform is not None:
             target = self.target_transform(anomaly)
 
+        if self.use_text_feat:
+            text_feat = self.text_feat_dict.get(image_path)
+            if text_feat is None:
+                raise ValueError(
+                    f"未找到 image_path={image_path} 的文本对应特征，"
+                    f"请先运行 text_counterpart 离线构建。"
+                )
+            return image, target, self.uq_idxs[idx], image_path, mask, mask_path, text_feat
+
         return image, target, self.uq_idxs[idx], image_path, mask, mask_path
         
 
     def __len__(self):
         return len(self.data_to_iterate)
+
+    def _load_text_features(self, text_feat_root):
+        """加载该 category 的文本对应特征（行与 image_path 对齐），构建 path->向量 字典。"""
+        npy_path = os.path.join(text_feat_root, f"{self.novel_class}.npy")
+        json_path = os.path.join(text_feat_root, f"{self.novel_class}_image_paths.json")
+        if not os.path.exists(npy_path) or not os.path.exists(json_path):
+            raise ValueError(
+                f"文本对应特征缺失：{npy_path} 或 {json_path}。"
+                f"请先运行 scripts/build_text_counterpart.sh 生成。"
+            )
+        features = np.load(npy_path)
+        with open(json_path, 'r', encoding='utf-8') as f:
+            image_paths = json.load(f)
+        if features.shape[0] != len(image_paths):
+            raise ValueError(
+                f"文本特征与路径数不匹配：{features.shape[0]} vs {len(image_paths)}"
+            )
+        text_feat_dict = {path: vec for path, vec in zip(image_paths, features)}
+        print(f"[Dataset_AnomalyNCD] 加载文本特征: {npy_path} ({len(text_feat_dict)} images)")
+        return text_feat_dict
 
     def get_image_data(self):
         
@@ -159,7 +199,9 @@ def get_anomalyncd_datasets(train_transform,
                                 labelled_classes, 
                                 unlabelled_classes, 
                                 data_root, 
-                                seed=0):
+                                seed=0,
+                                use_text_feat=False,
+                                text_feat_root=None):
     """
     Args:
         train_transform: [torchvision.transforms]. Transform to apply to the training data.
@@ -177,7 +219,11 @@ def get_anomalyncd_datasets(train_transform,
     np.random.seed(seed)
     
     # all
-    whole_set = Dataset_AnomalyNCD(source=data_root, base_path=base_path, novel_class=category, transform=train_transform)
+    whole_set = Dataset_AnomalyNCD(
+        source=data_root, base_path=base_path, novel_class=category,
+        transform=train_transform, use_text_feat=use_text_feat,
+        text_feat_root=text_feat_root,
+    )
 
     # label
     train_dataset_labelled = subsample_classes(deepcopy(whole_set), include_classes=labelled_classes)

@@ -30,6 +30,19 @@ train_subset:
   enabled: False
   ratio: 0.5
   normal_class: good
+text_counterpart:            # Task4/5：TAC 文本引导（默认关闭，保持 baseline 可复现）
+  enabled: False             # 是否启用文本对应特征（离线构建 + 数据集注入）
+  root: data_store/text_counterpart   # 离线文本特征共享 untracked 根
+  top_k: 5                   # filter_nouns 每中心保留名词数
+  tau: 0.005                 # retrieve_text 温度
+  cluster_num: null          # null => 自动取该 category 的 novel 类别数
+  concat_in_features: True   # Task4：文本特征与图像特征直接拼接
+  project_text: False        # 是否先经可训练线性投影再拼接
+cmd:                         # Task5：Cross-modal Mutual Distillation
+  enabled: False
+  weight: 0.1                # 跨模态蒸馏损失权重
+  entropy_weight: 1.0        # 负熵项权重
+  temperature: 0.5           # DistillLoss 温度
 experiment:
   seed: 3407
   print_freq: 3

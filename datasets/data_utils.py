@@ -30,7 +30,9 @@ def get_datasets(train_transform, test_transform, args):
                             labelled_classes=args.train_classes,
                             unlabelled_classes=args.unlabeled_classes,
                             category=args.category,
-                            data_root=args.crop_data_path)
+                            data_root=args.crop_data_path,
+                            use_text_feat=getattr(args, "use_text_feat", False),
+                            text_feat_root=getattr(args, "text_feat_root", None))
     
 
     # Set target transforms:
@@ -59,7 +61,8 @@ def get_datasets(train_transform, test_transform, args):
             )
 
     train_dataset = MergedDataset(labelled_dataset=deepcopy(datasets['train_labelled']),
-                                unlabelled_dataset=deepcopy(datasets['train_unlabelled']))
+                                unlabelled_dataset=deepcopy(datasets['train_unlabelled']),
+                                use_text_feat=getattr(args, "use_text_feat", False))
 
     test_dataset = datasets['test']
 
@@ -200,22 +203,28 @@ class MergedDataset(Dataset):
     Allows you to iterate over them in parallel
     """
 
-    def __init__(self, labelled_dataset, unlabelled_dataset):
+    def __init__(self, labelled_dataset, unlabelled_dataset, use_text_feat=False):
 
         self.labelled_dataset = labelled_dataset
         self.unlabelled_dataset = unlabelled_dataset
+        self.use_text_feat = use_text_feat
         self.target_transform = None
 
     def __getitem__(self, item):
 
         if item < len(self.labelled_dataset):
-            img, label, uq_idx, image_path, mask, mask_path = self.labelled_dataset[item]
-
+            if self.use_text_feat:
+                img, label, uq_idx, image_path, mask, mask_path, text_feat = self.labelled_dataset[item]
+            else:
+                img, label, uq_idx, image_path, mask, mask_path = self.labelled_dataset[item]
         else:
+            if self.use_text_feat:
+                img, label, uq_idx, image_path, mask, mask_path, text_feat = self.unlabelled_dataset[item - len(self.labelled_dataset)]
+            else:
+                img, label, uq_idx, image_path, mask, mask_path = self.unlabelled_dataset[item - len(self.labelled_dataset)]
 
-            img, label, uq_idx, image_path, mask, mask_path = self.unlabelled_dataset[item - len(self.labelled_dataset)]
-
-
+        if self.use_text_feat:
+            return img, label, image_path, mask, mask_path, text_feat
         return img, label, image_path, mask, mask_path
 
     def __len__(self):

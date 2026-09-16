@@ -80,6 +80,22 @@ def load_args(cfg, args):
     args.use_train_subset = bool(train_subset_cfg.get('enabled', False))
     args.train_subset_ratio = float(train_subset_cfg.get('ratio', 0.5))
     args.train_subset_normal_class = str(train_subset_cfg.get('normal_class', 'good'))
+    # Task4/5：TAC 文本引导（text counterpart + cross-modal mutual distillation）
+    text_cfg = cfg.get('text_counterpart', {})
+    args.use_text_feat = bool(text_cfg.get('enabled', False))
+    args.text_feat_root = str(text_cfg.get('root', 'data_store/text_counterpart'))
+    args.text_top_k = int(text_cfg.get('top_k', 5))
+    args.text_tau = float(text_cfg.get('tau', 0.005))
+    args.text_cluster_num = text_cfg.get('cluster_num')  # 允许 None 自动推断
+    args.concat_text = bool(text_cfg.get('concat_in_features', False))
+    args.project_text = bool(text_cfg.get('project_text', False))
+    # WordNet 名词表来自 TAC 官方参考实现，随仓库提交。
+    args.text_noun_csv = str(cfg.get('text_noun_csv', 'reference/2024-ICML-TAC/data/WordNetNouns.csv'))
+    cmd_cfg = cfg.get('cmd', {})
+    args.cmd_enabled = bool(cmd_cfg.get('enabled', False))
+    args.cmd_weight = float(cmd_cfg.get('weight', 0.1))
+    args.cmd_entropy_weight = float(cmd_cfg.get('entropy_weight', 1.0))
+    args.cmd_temperature = float(cmd_cfg.get('temperature', 0.5))
     # ----------------------
     # experiment setting
     # ----------------------

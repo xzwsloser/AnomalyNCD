@@ -35,7 +35,9 @@ from utils.cluster_and_log_utils import log_accs_from_preds
 from models.modules.load_backbone import load_backbone
 from models.loss._distill_loss import DistillLoss
 from models.loss._contrastive_loss import info_nce_logits, SupConLoss
+from models.loss._tac_loss import TACDistillLoss, consistency_loss, entropy
 from models.modules._classifier import get_params_groups, MultiHead
+from models.modules._tac_text import TextProjector, TextClusterHead
 
 
 def setup_seed(seed):
@@ -48,6 +50,9 @@ def setup_seed(seed):
 class AnomalyNCD():
     def __init__(self, args):
         self.args = args
+        # 设备在 __init__ 中初始化，便于 main() 在 train_init 之前调用
+        # build_text_counterpart（离线文本特征构建需要指定 device）。
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
     def train_init(self):
@@ -55,7 +60,6 @@ class AnomalyNCD():
         Initialize the training parameters.
         """
 
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.args = get_class_splits(self.args)
 
         setup_seed(self.args.seed)
@@ -64,6 +68,7 @@ class AnomalyNCD():
         self.args.num_unlabeled_classes = len(self.args.unlabeled_classes)
         self.args.image_size = 224
         self.args.feat_dim = 768
+        self.args.text_dim = 512  # Task4/5：CLIP ViT-B/32 文本对应特征维度
         self.args.num_mlp_layers = 3
         self.args.mlp_out_dim = self.args.num_labeled_classes + self.args.num_unlabeled_classes
         self.args.interpolation = 3
@@ -74,6 +79,13 @@ class AnomalyNCD():
         torch.backends.cudnn.benchmark = True
 
         self.model = self.load_model()
+
+        # Task5：跨模态互蒸馏损失（仅在启用时初始化）。
+        if getattr(self.args, "cmd_enabled", False):
+            self.cmd_criterion = TACDistillLoss(
+                class_num=self.args.mlp_out_dim,
+                temperature=getattr(self.args, "cmd_temperature", 0.5),
+            ).to(self.device)
 
         self.train_loader, self.test_loader = self.load_datasets()
 
@@ -98,12 +110,59 @@ class AnomalyNCD():
                     m.requires_grad = True
 
         # load projector
-        projector = MultiHead(in_dim=self.args.feat_dim, out_dim=self.args.mlp_out_dim, nlayers=self.args.num_mlp_layers, n_head=self.args.n_head, use_etf=self.args.use_etf)
+        # Task4：启用文本拼接时，分类头输入维度由图像特征 + 文本特征构成。
+        projector_in_dim = self.args.feat_dim
+        if getattr(self.args, "concat_text", False):
+            projector_in_dim += self.args.text_dim
+        projector = MultiHead(in_dim=projector_in_dim, out_dim=self.args.mlp_out_dim, nlayers=self.args.num_mlp_layers, n_head=self.args.n_head, use_etf=self.args.use_etf)
 
         model = nn.Sequential(MGViT, projector).to(self.device)
 
+        # Task4/5：文本分支（可选）。文本特征本身离线冻结，仅文本投影/文本聚类头可训练，
+        # 单独保存以兼容 AnomalyNCD 原 nn.Sequential 的 state_dict 结构。
+        self.text_projector = None
+        self.text_cluster_head = None
+        self.text_modules = nn.ModuleList()
+        if getattr(self.args, "use_text_feat", False):
+            if getattr(self.args, "project_text", False):
+                self.text_projector = TextProjector(self.args.text_dim).to(self.device)
+                self.text_modules.append(self.text_projector)
+            if getattr(self.args, "cmd_enabled", False):
+                self.text_cluster_head = TextClusterHead(
+                    self.args.text_dim, self.args.mlp_out_dim).to(self.device)
+                self.text_modules.append(self.text_cluster_head)
+
         return model
 
+    def trainable_params(self):
+        """收集可训练参数分组：图像主干/投影头 + 文本分支（若有）。"""
+        params_groups = get_params_groups(self.model)
+        if len(self.text_modules):
+            text_groups = get_params_groups(self.text_modules)
+            params_groups = [
+                {**base, 'params': base['params'] + text['params']}
+                for base, text in zip(params_groups, text_groups)
+            ]
+        return params_groups
+
+    def build_text_counterpart(self):
+        """离线构建该 category 的文本对应特征（幂等：已存在则跳过）。
+
+        Task4/5 前置步骤：用 CLIP 对全部子图生成 text counterpart 并落盘到共享路径，
+        供 Dataset_AnomalyNCD 按 image_path 反查。
+        """
+        from models.modules._tac_text import build_or_load
+        build_or_load(
+            novel_image_root=os.path.join(self.args.crop_data_path, self.args.category),
+            base_image_root=self.args.base_data_path,
+            category=self.args.category,
+            out_root=self.args.text_feat_root,
+            top_k=getattr(self.args, "text_top_k", 5),
+            tau=getattr(self.args, "text_tau", 0.005),
+            cluster_num=getattr(self.args, "text_cluster_num", None),
+            noun_csv=self.args.text_noun_csv,
+            device=self.device,
+        )
 
     def load_datasets(self):
         """
@@ -152,13 +211,25 @@ class AnomalyNCD():
 
         # Iterate over test data loader to process each batch of sub-images
         for batch_idx, batch in enumerate(tqdm(self.test_loader)):
-            images, label, uq_idx, image_path, masks, mask_path = batch
+            use_text = getattr(self.args, "use_text_feat", False)
+            if use_text:
+                images, label, uq_idx, image_path, masks, mask_path, text_feat = batch
+                text_feat = text_feat.cuda(non_blocking=True)
+            else:
+                images, label, uq_idx, image_path, masks, mask_path = batch
             images = images.cuda(non_blocking=True)
             masks = masks.cuda(non_blocking=True)
             with torch.no_grad():
 
                 MGViT, projector = self.model
                 cls_token = MGViT(images, masks)
+                # Task4：推理时同样拼接文本对应特征（若启用拼接）。
+                if use_text and getattr(self.args, "concat_text", False):
+                    if getattr(self.args, "project_text", False) and self.text_projector is not None:
+                        text_feat_for_concat = self.text_projector(text_feat)
+                    else:
+                        text_feat_for_concat = text_feat
+                    cls_token = torch.cat([cls_token, text_feat_for_concat], dim=-1)
                 _, logits = projector(cls_token)
 
                 for i in range(self.args.n_head):
@@ -226,7 +297,12 @@ class AnomalyNCD():
 
         # Iterate over test data loader to process each batch of sub-images
         for batch_idx, batch in enumerate(tqdm(self.test_loader)):
-            images, labels, uq_idx, image_path, masks_img, mask_paths = batch
+            use_text = getattr(self.args, "use_text_feat", False)
+            if use_text:
+                images, labels, uq_idx, image_path, masks_img, mask_paths, text_feat = batch
+                text_feat = text_feat.cuda(non_blocking=True)
+            else:
+                images, labels, uq_idx, image_path, masks_img, mask_paths = batch
             images = images.cuda(non_blocking=True)
             masks_img = masks_img.cuda(non_blocking=True)
 
@@ -234,6 +310,13 @@ class AnomalyNCD():
             with torch.no_grad():
                 MGViT, projector = self.model
                 cls_token = MGViT(images, masks_img)
+                # Task4：推理时同样拼接文本对应特征（若启用拼接）。
+                if use_text and getattr(self.args, "concat_text", False):
+                    if getattr(self.args, "project_text", False) and self.text_projector is not None:
+                        text_feat_for_concat = self.text_projector(text_feat)
+                    else:
+                        text_feat_for_concat = text_feat
+                    cls_token = torch.cat([cls_token, text_feat_for_concat], dim=-1)
                 _, logits = projector(cls_token)
 
                 logits = torch.stack(logits).permute(1,0,2)
@@ -528,7 +611,11 @@ class AnomalyNCD():
 
         self.model.train()
         for batch_idx, batch in enumerate(self.train_loader):
-            images, class_labels, image_path, masks, mask_path  = batch
+            use_text = getattr(self.args, "use_text_feat", False)
+            if use_text:
+                images, class_labels, image_path, masks, mask_path, text_feat = batch
+            else:
+                images, class_labels, image_path, masks, mask_path = batch
 
             # Generate pseudo-label weights for pseudo-label correction.
             sample_weights, mask_lab = get_pseudo_label_weights(image_path, self.args.anomaly_thred, self.args.base_category, anomaly_score_json)
@@ -542,10 +629,20 @@ class AnomalyNCD():
                 class_labels, mask_lab = class_labels.cuda(non_blocking=True), mask_lab.cuda(non_blocking=True).bool()
                 images = torch.cat(images, dim=0).cuda(non_blocking=True)
                 masks = torch.cat(masks, dim=0).cuda(non_blocking=True)
+                # 文本特征与图像一致：同一原图的两个增强 view 共享同一文本对应特征。
+                if use_text:
+                    text_feat = torch.cat([text_feat, text_feat], dim=0).cuda(non_blocking=True)
 
                 MGViT, projector = self.model
                 # MGViT extracts class tokens from input images using provided masks.
                 student_cls_token = MGViT(images, masks)
+                # Task4：图像 cls_token 与文本对应特征直接拼接后送入投影分类头。
+                if use_text and getattr(self.args, "concat_text", False):
+                    if getattr(self.args, "project_text", False) and self.text_projector is not None:
+                        text_feat_for_concat = self.text_projector(text_feat)
+                    else:
+                        text_feat_for_concat = text_feat
+                    student_cls_token = torch.cat([student_cls_token, text_feat_for_concat], dim=-1)
                 # The extracted class tokens are then passed through the projector.
                 student_proj, student_out = projector(student_cls_token)
 
@@ -586,15 +683,33 @@ class AnomalyNCD():
                 cls_loss /= n_head
                 cluster_loss /= n_head
 
+                # Task5：Cross-modal Mutual Distillation（仅训练阶段，推理不走文本分支）。
+                cmd_loss = None
+                if use_text and getattr(self.args, "cmd_enabled", False) and self.text_cluster_head is not None:
+                    image_assign = F.softmax(student_out[0], dim=-1)
+                    text_assign = self.text_cluster_head(text_feat)
+                    # 文本/图像分配互为教师-学生，辅以一致性项并减负熵防止退化。
+                    cmd_distill = (self.cmd_criterion(image_assign, text_assign)
+                                   + self.cmd_criterion(text_assign, image_assign))
+                    cmd_consist = consistency_loss(text_assign, image_assign)
+                    cmd_entropy = entropy(image_assign) + entropy(text_assign)
+                    cmd_loss = self.args.cmd_weight * (
+                        cmd_distill + cmd_consist - self.args.cmd_entropy_weight * cmd_entropy
+                    )
+
 
                 pstr += f'cls_loss: {cls_loss.item():.4f} '
                 pstr += f'cluster_loss: {cluster_loss.item():.4f} '
                 pstr += f'sup_con_loss: {sup_con_loss.item():.4f} '
                 pstr += f'contrastive_loss: {contrastive_loss.item():.4f} '
+                if cmd_loss is not None:
+                    pstr += f'cmd_loss: {cmd_loss.item():.4f} '
 
                 loss = 0
                 loss += (1 - self.args.sup_weight) * cluster_loss + self.args.sup_weight * cls_loss
                 loss += (1 - self.args.sup_weight) * contrastive_loss + self.args.sup_weight * sup_con_loss
+                if cmd_loss is not None:
+                    loss += cmd_loss
 
                 # Train acc
                 loss_record.update(loss.item(), class_labels.size(0))
@@ -621,6 +736,10 @@ class AnomalyNCD():
         # Main Element Binarization: generate the binarized results for unlabeled images and apply the Anomaly-Centered Sub-Image Cropping operation.
         self.binarization()
 
+        # Task4/5：若有需要则离线构建该 category 的文本对应特征（幂等）。
+        if getattr(self.args, "use_text_feat", False):
+            self.build_text_counterpart()
+
         # training the model
         self.train_init()
 
@@ -629,6 +748,10 @@ class AnomalyNCD():
             if os.path.exists(self.args.checkpoint_path):
                 checkpoint = torch.load(self.args.checkpoint_path)
                 self.model.load_state_dict(checkpoint['model'])
+                if checkpoint.get('text_modules') and len(self.text_modules):
+                    # 载入文本分支（文本投影 / 文本聚类头）状态
+                    for module, state in zip(self.text_modules, checkpoint['text_modules']):
+                        module.load_state_dict(state)
                 self.args.logger.info("model loaded from {}, epoch {}, base_cls:{}.".format(self.args.checkpoint_path, checkpoint['epoch'], checkpoint['base_category']))
             else:
                 raise ValueError('The checkpoint path does not exist.')
@@ -637,7 +760,7 @@ class AnomalyNCD():
             self.args.logger.info('Region Merging for Image Classification...')
             results_merge = self.region_merge_predict(epoch=checkpoint['epoch'], save_name='Region merged prediction', loss_list=checkpoint['loss_list'])
         else:
-            params_groups = get_params_groups(self.model)
+            params_groups = self.trainable_params()
             optimizer = SGD(params_groups, lr=self.args.lr, momentum=self.args.momentum, weight_decay=self.args.weight_decay)
 
             exp_lr_scheduler = lr_scheduler.CosineAnnealingLR(
@@ -668,6 +791,7 @@ class AnomalyNCD():
 
                 save_dict = {
                     'model': self.model.state_dict(),
+                    'text_modules': [m.state_dict() for m in self.text_modules] if len(self.text_modules) else None,
                     'optimizer': optimizer.state_dict(),
                     'epoch': epoch + 1,
                     'loss_list': cluster_loss_head,
