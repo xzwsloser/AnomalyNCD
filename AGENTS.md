@@ -82,8 +82,10 @@ AnomalyNCD/
 | `papers/2410.14379v2.pdf` | *AnomalyNCD: Towards Novel Anomaly Class Discovery in Industrial Scenarios*（arXiv:2410.14379） | 主仓库对应论文，方法、实验与消融说明可结合 `README.md` 阅读 | 本仓库 `models/` |
 | `papers/2308.02989v3.pdf` | *Novel Class Discovery for Long-tailed Recognition*（NCDLR，TMLR 2023，arXiv:2308.02989） | 提出 equiangular（等角）prototype 的 ETF 分类头，用于长尾场景的类别发现 | `reference/NCDLR/` |
 | `papers/Banerjee_AMEND_Adaptive_Margin_and_Expanded_Neighborhood_for_Efficient_Generalized_Category_WACV_2024_paper.pdf` | *AMEND: Adaptive Margin and Expanded Neighborhood for Efficient Generalized Category Discovery*（WACV 2024） | 提出 expanded neighborhood 对比学习与 adaptive margin prototype 正则，用于广义类别发现 | Task3 计划新增实现：`models/amend.py` 与 `models/loss/_amend_loss.py`（当前尚未创建） |
+| `papers/2310.11989v3.pdf` | *Image Clustering with External Guidance*（TAC，ICML 2024 Oral，arXiv:2310.11989） | 无类别名先验时利用 CLIP 跨模态语义引导聚类：`Text Counterpart Construction`（离线 generate 每张图像的文本对应特征）与 `Cross-modal Mutual Distillation`（文本/图像聚类头互蒸馏） | `reference/2024-ICML-TAC/`（Task4/5 已接入主仓库 `models/modules/_tac_text.py` 与 `models/loss/_tac_loss.py`，见 `plans/task4_plan.md`） |
 
 - **ETF 模块**：`reference/NCDLR/nets/vit.py` 中的 `ETF_Classifier`（含 `generate_random_orthogonal_matrix`），构造等角分类 prototype 矩阵 `ori_M`，前向时对特征归一化后与 `ori_M` 做矩阵乘法得到 logits。当前主仓库的 `models/modules/_classifier.py` 已在 Task1 中接入 ETF，可通过 `models.use_etf` 配置启用。
+- **TAC（文本引导聚类）模块**：`reference/2024-ICML-TAC/` 是论文 *Image Clustering with External Guidance*（arXiv:2310.11989）的官方实现。核心管线：`image_embedding.py`/`text_embedding.py`（CLIP 编码图像与 WordNet 名词）→ `filter_nouns.py`（faiss spherical k-means 图像中心 + 反向分类逐中心挑选 topK 判别名词）→ `retrieve_text.py`（softmax(feat·nouns^T/tau)@nouns 得到每图文本对应特征）→ `concat_kmeans.py`/`train_head.py`（特征拼接 k-means，或 `models.py::ClusterHead` + `loss_utils.py` 的跨模态互蒸馏）。当前主仓库在 Task4 中接入文本对应生成与特征拼接、在 Task5 中接入跨模态互蒸馏，对应实现见 `models/modules/_tac_text.py` 与 `models/loss/_tac_loss.py`。
 - 主仓库自身对应论文 *AnomalyNCD*（arXiv:2410.14379）的 PDF 已存放在 `papers/2410.14379v2.pdf`，方法说明同时参考 `README.md`。
 
 ## 4. 代码风格约束
