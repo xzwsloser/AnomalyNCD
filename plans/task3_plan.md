@@ -7,6 +7,7 @@
 | 2026-09-13 | 根据飞书任务三要求重写计划：明确 AMEND 代码适配、MEBin 输入输出兼容、损失实现、实验设置与验证方式。 |
 | 2026-09-14 | 复核飞书文档 revision 716、AMEND 论文与当前代码：修正直接邻居默认值与损失实现口径，明确与 AnomalyNCD 兼容时保持的超参数偏差，并补充规划阶段 session 记录。 |
 | 2026-09-15 | 执行代码实现与本地验证；服务器 bottle smoke test 暴露 projector 权重设备迁移问题，已改为动态获取 `last_layer` 分类器并记录待复跑。 |
+| 2026-09-16 | 定位服务器报错根因：torch 2.0.1 的 `weight_norm` bug 使分类器 `.weight` 属性在模型迁移 GPU 后仍返回 CPU 张量。新增 `AMENDProjector.classifier_weight()` 由 `weight_g`/`weight_v` 手动重建权重，并用于 `forward` 的 logits 与 margin loss，本地及服务器 GPU 验证通过。 |
 
 ## 目标
 

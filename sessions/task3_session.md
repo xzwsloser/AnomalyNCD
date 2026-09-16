@@ -91,3 +91,28 @@
 1. 用户在服务器 `feat_task_3` 分支使用 `DCproject` 环境复跑 `bottle` smoke test。
 2. smoke test 通过后批量运行 MVTec 15 类，汇总子图像和 region merged NMI/ARI/F1。
 3. 与 baseline 对比时记录 `sup_weight=0.3`、`memax_weight=4` 沿用 AnomalyNCD，而非 AMEND 论文的 `0.35` 与 `2`。
+
+### v3（2026-09-16）修复服务器 device 不一致报错
+
+#### 实际改动内容
+
+1. 新增 `models/amend.py::AMENDProjector.classifier_weight()`：由 `weight_g` 与 `weight_v` 手动重建 weight-norm 分类头权重，返回 shape `(num_classes, feat_dim)` 且位于正确设备。
+2. `AMENDProjector.forward` 中使用 `classifier_weight()` 构造归一化原型（替代 bug 的 `self.classifier.weight`）。
+3. `AMEND.MGRL` 的 `AdaptiveMarginLoss` 入参改为 `projector.classifier_weight()`，保证 margin loss 在 cuda 上计算。
+4. 已同步到服务器 `feat_task_3` 分支 `~/anomaly_ncd/AnomalyNCD`。
+
+#### 运行 / 验证结果
+
+1. 服务器 `DCproject` 环境复现确认根因：torch 2.0.1 中 `weight_norm` 模块 `weight_g`/`weight_v` 均位于 `cuda:0`，但 `module.weight` 属性仍返回 CPU 张量。
+2. 服务器 GPU smoke test：`AMENDProjector(in_dim=768, out_dim=20)` 迁到 cuda 后输入 cuda 特征，`x_proj` 与 logits 均为 `cuda:0`，无 device 报错。
+3. 服务器 GPU 验证 `AdaptiveMarginLoss(P.classifier_weight())` 返回 `cuda:0` 张量，loss 数值有限。
+4. 服务器 `py_compile models/amend.py` 通过（DCproject 环境）。
+
+#### 遇到的问题与解决方式
+
+1. 初版 plan 记录"改为动态获取 `last_layer[0]`"并不能根治问题：device 迁移后 `last_layer[0].weight` 属性本身在 torch 2.0.1 下返回 CPU 张量。解决方式是绕过 `.weight` 属性，手动由 `weight_g * normalize(weight_v)` 重建，与 weight_norm 的 reparametrization 定义一致。
+
+#### 遗留事项
+
+1. 用户在服务器 `feat_task_3` 分支用 `DCproject` 环境复跑 `bottle` smoke test，确认训练、checkpoint、日志与 NMI/ARI/F1 输出正常。
+2. smoke test 通过后批量运行 MVTec 15 类并汇总指标。

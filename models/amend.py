@@ -39,9 +39,17 @@ class AMENDProjector(nn.Module):
             logits = [self.projector.etf(normalized_features)]
         else:
             # AMEND 论文要求 hidden feature 与 prototype 都做 l2 normalization。
-            prototypes = F.normalize(self.classifier.weight, dim=-1, p=2)
+            prototypes = F.normalize(self.classifier_weight(), dim=-1, p=2)
             logits = [normalized_features @ prototypes.T]
         return x_proj, logits
+
+    def classifier_weight(self):
+        # torch 2.0.1 的 weight_norm 存在 bug：模型迁移到 GPU 后 `.weight` 属性仍会
+        # 返回 CPU 张量，导致与 cuda 特征做矩阵乘时报 device 不一致。这里直接由
+        # weight_g / weight_v 手动重建分类头权重（与 weight_norm 的 reparametrization
+        # 定义一致），保证结果张量位于正确设备。
+        clf = self.classifier
+        return clf.weight_g * F.normalize(clf.weight_v, dim=0)
 
     @property
     def classifier(self):
@@ -128,7 +136,7 @@ class AMEND(AnomalyNCD):
                 neighborhood_loss, direct_loss, expanded_loss = self.neighborhood_criterion(
                     student_proj, original_ids, return_components=True
                 )
-                margin_loss = self.margin_criterion(projector.classifier.weight)
+                margin_loss = self.margin_criterion(projector.classifier_weight())
 
                 student_proj_lab = torch.cat(
                     [feature[mask_lab].unsqueeze(1) for feature in student_proj.chunk(2)], dim=1
