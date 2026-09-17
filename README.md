@@ -271,6 +271,22 @@ Run the training script:
 bash scripts/anomalyncd.sh
 ```
 
+If a category's training is interrupted (e.g., out-of-memory from other concurrent jobs),
+you can resume it from the last completed epoch instead of retraining from scratch:
+```
+python examples/anomalyncd_main.py --config configs/AnomalyNCD.yaml --resume <path-to-checkpoints-dir>
+```
+`--resume` accepts either a checkpoint directory (it appends `checkpoints/model.pt`) or the
+`model.pt` file directly. It restores the model, text modules, optimizer, learning-rate
+schedule, and epoch counter, then continues training from where it stopped. An interrupted
+category's checkpoint is available after each completed epoch (saved to
+`<exp_root>/<runner_name>/log/<exp>_<category>_(...)/checkpoints/model.pt`).
+
+For the Task4+5 pipeline, a convenience script `scripts/anomalyncd_task45_resume.sh`
+auto-resumes interrupted categories: it skips already-finished categories and restarts
+each unfinished one (with `--resume` if a partial checkpoint exists, otherwise from scratch).
+Re-running it is idempotent and safe to repeat after any interruption.
+
 The key arguments of the script are as follows:
 
 - ``gpu``: The gpu id for training.

@@ -743,6 +743,10 @@ class AnomalyNCD():
         # training the model
         self.train_init()
 
+        # Task6：--resume 仅用于训练续跑；若同时指定 --only_test，则走推理分支并忽略 --resume。
+        if self.args.only_test and getattr(self.args, 'resume', None):
+            self.args.logger.warning('--resume is ignored when --only_test is set.')
+
         if self.args.only_test:
             self.args.checkpoint_path = os.path.join(self.args.checkpoint_path, 'checkpoints/model.pt')
             if os.path.exists(self.args.checkpoint_path):
@@ -781,7 +785,34 @@ class AnomalyNCD():
                                 repeat_times=self.args.repeat_times
                             )
 
-            for epoch in range(self.args.epochs):
+            # Task6：断点续训。若指定 --resume，从 checkpoint 恢复模型/文本分支/优化器状态，
+            # 恢复 epoch 计数并推进学习率调度器，从中断的 epoch 继续训练。
+            start_epoch = 0
+            if getattr(self.args, 'resume', None):
+                resume_path = self.args.resume
+                # 兼容两种输入：目录（自动补 checkpoints/model.pt）或 model.pt 文件本身
+                if os.path.isdir(resume_path):
+                    resume_path = os.path.join(resume_path, 'checkpoints', 'model.pt')
+                if not os.path.exists(resume_path):
+                    raise ValueError('The resume checkpoint path does not exist: {}.'.format(resume_path))
+                resume_ckpt = torch.load(resume_path)
+                self.model.load_state_dict(resume_ckpt['model'])
+                if resume_ckpt.get('text_modules') and len(self.text_modules):
+                    # 载入文本分支（文本投影 / 文本聚类头）状态
+                    for module, state in zip(self.text_modules, resume_ckpt['text_modules']):
+                        module.load_state_dict(state)
+                optimizer.load_state_dict(resume_ckpt['optimizer'])
+                start_epoch = int(resume_ckpt['epoch'])
+                # 类别一致性校验：防止误用其他类别的 checkpoint 导致的无效续训
+                if resume_ckpt.get('category') and resume_ckpt['category'] != self.args.category:
+                    self.args.logger.warning('Resume category mismatch: checkpoint={} vs args={}.'.format(
+                        resume_ckpt['category'], self.args.category))
+                # CosineAnnealingLR 前进 start_epoch 步，使 last_epoch/当前 LR 与断点一致
+                for _ in range(start_epoch):
+                    exp_lr_scheduler.step()
+                self.args.logger.info("resume training from epoch {}, loaded {}.".format(start_epoch, resume_path))
+
+            for epoch in range(start_epoch, self.args.epochs):
                 cluster_loss_head, loss_record = self.MGRL(epoch, optimizer, cluster_criterion)
 
                 self.args.logger.info('Train Epoch: {} Avg Loss: {:.4f} '.format(epoch, loss_record.avg))
@@ -794,11 +825,15 @@ class AnomalyNCD():
                     'text_modules': [m.state_dict() for m in self.text_modules] if len(self.text_modules) else None,
                     'optimizer': optimizer.state_dict(),
                     'epoch': epoch + 1,
+                    'epochs': self.args.epochs,  # 供续训脚本判断类别是否训练完成
                     'loss_list': cluster_loss_head,
                     'base_category': self.args.base_category,
                     'category': self.args.category,
                     'mask_layers': self.args.mask_layers
                 }
+
+                # 每个 epoch 结束都覆盖写入同一 model.pt，保证中断后可从最近完成的 epoch 续训
+                torch.save(save_dict, self.args.model_path)
 
                 if epoch + 1 == self.args.epochs:
                     # Testing the results after training
@@ -806,6 +841,4 @@ class AnomalyNCD():
                     results_sub_images = self.sub_image_predict(epoch=epoch, save_name='Sub-image prediction', loss_list=cluster_loss_head)
                     self.args.logger.info('Region Merging for Image Classification...')
                     results_merge = self.region_merge_predict(epoch=epoch, save_name='Region merged prediction', loss_list=cluster_loss_head)
-                    # Save the model
-                    torch.save(save_dict, self.args.model_path)
                     self.args.logger.info("model saved to {}_epoch{}, base_cls:{}.".format(self.args.model_path, epoch, self.args.num_labeled_classes))

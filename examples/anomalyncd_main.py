@@ -30,6 +30,8 @@ def get_args():
     parser.add_argument('--runner_name', default='AnomalyNCD', type=str)
     parser.add_argument('--only_test', type=str, default=None, help='test using the trained checkpoint')
     parser.add_argument('--checkpoint_path', type=str, default=None, help='path of the trained checkpoint')
+    # Task6：断点续训。传入 checkpoint 所在目录（自动补 checkpoints/model.pt）或 model.pt 文件本身。
+    parser.add_argument('--resume', type=str, default=None, help='resume training from a saved checkpoint (dir of checkpoints or model.pt file)')
 
     args = parser.parse_args()
 
