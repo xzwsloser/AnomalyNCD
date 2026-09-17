@@ -176,3 +176,9 @@ TAC 的核心：在没有「类别名先验」的情况下，利用 CLIP 预训�
 ## 9. 修改记录
 
 - 2026-09-16：创建本计划（合并任务4+任务5）。待用户 review。
+- 2026-09-17：补记「服务器 CLIP 离线加载」修复计划。根因：服务器无外网，
+  `open_clip` 在加载 ViT-B-32 权重时回退到 `huggingface.co` 在线下载，出现
+  `Network unreachable` 并持续重试直至 `KeyboardInterrupt`。方案：在
+  `_tac_text.build_or_load` 中，当 `CLIP_CHECKPOINT` 未设置时自动探测共享
+  `data_store/clip/ViT-B-32.pt`（已预置的 openai JIT 权重，open_clip 2.32 可直接
+  加载），根除联网依赖；同时在服务器 repo 建立 `data_store` → 共享数据根符号链接。

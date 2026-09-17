@@ -91,3 +91,13 @@ Task5（Cross-modal Mutual Distillation）的代码实现，全部为非端到�
   `configs/AnomalyNCD_task45.yaml`（`concat_in_features=True` 且 `cmd.enabled=True`）
   与运行脚本 `scripts/anomalyncd_task45.sh`；`concat_text` 与 `cmd_enabled` 两个开关相互独立，
   可在同一次训练中同时启用（拼接仅用于图像分支特征，CMD 仅在训练阶段、推理不走文本分支）。
+- 2026-09-17：解决服务器 CLIP 下载挂起问题。
+  - 根因：服务器无外网，`open_clip` 默认从 `huggingface.co` 下载 ViT-B-32 权重，
+    出现 `Network unreachable` 并重试挂起直至 `KeyboardInterrupt`。
+  - 修复：`models/modules/_tac_text.py::build_or_load` 增加本地 checkpoint 自动探测
+    （`data_store/clip/ViT-B-32.pt`，`CLIP_CHECKPOINT` 仍可覆盖）；服务器 repo 建立
+    `data_store` → `/home/dachuang/data_store/AnomalyNCD_data` 符号链接。
+  - 验证：open_clip 2.32.0 离线加载该 openai JIT 权重并 `encode_text` 正常；
+    `scripts/build_text_counterpart.sh` 在 DCproject + GPU2 后台跑 bottle，CLIP 本地
+    加载成功、GPU2 利用率正常、不再联网挂起（余下 category 后台继续）。
+  - 说明：修复文件已同步到服务器 `feat_task_4` 工作区，未提交。

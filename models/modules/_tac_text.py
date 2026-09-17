@@ -240,6 +240,15 @@ def build_or_load(novel_image_root, base_image_root, category, out_root,
     # 允许通过环境变量 CLIP_CHECKPOINT 指定本地权重，未指定则走在线路径。
     if pretrained_path is None:
         pretrained_path = os.environ.get("CLIP_CHECKPOINT")
+    # 服务器离线：自动探测共享 data_store 中预置的 openai JIT 权重，避免
+    # open_clip 回退到 huggingface.co 在线下载（服务器无外网 → Network
+    # unreachable 挂起直至 KeyboardInterrupt）。CLIP_CHECKPOINT 仍可覆盖。
+    if not pretrained_path:
+        _repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.realpath(__file__))))
+        _candidate = os.path.join(_repo_root, "data_store", "clip", "ViT-B-32.pt")
+        if os.path.isfile(_candidate):
+            pretrained_path = _candidate
 
     paths = collect_image_paths(novel_image_root, base_image_root)
     if len(paths) == 0:
